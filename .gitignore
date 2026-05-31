@@ -3,3 +3,7 @@
 
 # OS
 .DS_Store
+
+# Local config + secrets (TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT).
+# .env.example is committed; the real .env is not.
+.env

@@ -171,13 +171,20 @@ then execs the loop:
 # 1. Authenticate once on a trusted machine and capture the token.
 claude setup-token            # prints CLAUDE_CODE_OAUTH_TOKEN
 
-# 2. Provide config + secrets (e.g. an .env file beside docker-compose.yml):
-#    TARGET_REPO=https://github.com/you/your-repo.git
-#    CLAUDE_CODE_OAUTH_TOKEN=...
-#    GIT_PAT=...
+# 2. Provide config + secrets. Copy the template and fill in the three required
+#    keys (TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT); the rest have defaults.
+cp .env.example .env
+$EDITOR .env
+
+# 3. Bring up the stack. docker compose loads .env automatically.
 docker compose up -d --build
 docker compose logs -f
 ```
+
+`docker-compose.yml` loads `.env` via `env_file` with `required: false`, so the
+file is optional — if you'd rather inject the variables from the shell or an
+orchestrator, the stack still comes up without it. `.env` is git-ignored;
+`.env.example` is the committed template.
 
 To verify persistence: let the loop drain the target repo's `02-refined/`
 column, then `docker compose restart`. The logs show `updating existing
