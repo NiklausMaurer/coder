@@ -138,6 +138,76 @@ test_update_existing() {
     || nope "did not take the update path"
 }
 
+# --- Test: dirty-tree hygiene — discard leftovers before pulling -------------
+#
+# Slice 04: a crashed run can leave uncommitted changes / untracked files in the
+# checkout. Before pulling, the runner must `git reset --hard` + `git clean -fd`
+# so a fast-forward that would otherwise fail ("would be overwritten") succeeds,
+# without ever rewriting committed history.
+
+test_dirty_tree_hygiene() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base")"
+  local stub;   stub="$(make_fake_claude_landing "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+
+  # Pre-clone so the runner takes the existing-checkout path.
+  git clone --quiet "file://$remote" "$base/checkout"
+
+  # Advance the remote (throwaway clone): change a tracked file and add a new
+  # one, so the runner's pull has something to fast-forward onto.
+  git clone --quiet "file://$remote" "$base/advance"
+  git -C "$base/advance" config user.email adv@example.com
+  git -C "$base/advance" config user.name "Adv"
+  printf 'updated by remote\n' > "$base/advance/.claude/marker"
+  printf 'new remote file\n'   > "$base/advance/REMOTE_NEW"
+  git -C "$base/advance" add -A
+  git -C "$base/advance" commit --quiet -m "advance: remote moved on"
+  git -C "$base/advance" push --quiet origin HEAD:main
+
+  # Dirty the checkout so a plain `pull --ff-only` would refuse:
+  #  - uncommitted edit to a tracked file the remote also changed,
+  #  - untracked file that collides with one the remote commit introduces,
+  #  - a stray untracked file with no remote counterpart.
+  printf 'local crash leftover\n' > "$base/checkout/.claude/marker"
+  printf 'local untracked\n'       > "$base/checkout/REMOTE_NEW"
+  printf 'stray\n'                 > "$base/checkout/STRAY_UNTRACKED"
+
+  # Committed HEAD before the run — cleanup must not rewrite it.
+  local head_before; head_before="$(git -C "$base/checkout" rev-parse HEAD)"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] \
+    && ok "exits 0 despite a dirty tree that would block a plain pull" \
+    || nope "expected exit 0, got $rc"
+
+  # Fast-forward succeeded: the remote's change to the tracked file is now live.
+  grep -qx "updated by remote" "$base/checkout/.claude/marker" \
+    && ok "discards uncommitted changes and fast-forwards onto the remote" \
+    || nope "checkout did not pick up the remote change to the tracked file"
+
+  # Untracked stray with no remote counterpart is gone (git clean -fd).
+  [ ! -e "$base/checkout/STRAY_UNTRACKED" ] \
+    && ok "removes untracked leftovers with git clean -fd" \
+    || nope "untracked leftover survived the cleanup"
+
+  # Cleanup never rewrites committed history: HEAD only moved forward, with the
+  # pre-run commit still an ancestor (fast-forward, no rebase/amend/force).
+  local new_head; new_head="$(git -C "$base/checkout" rev-parse HEAD)"
+  if git -C "$base/checkout" merge-base --is-ancestor "$head_before" "$new_head"; then
+    ok "preserves committed history across cleanup + pull (fast-forward only)"
+  else
+    nope "committed history was rewritten by the cleanup"
+  fi
+}
+
 # --- Test: surfaces failure --------------------------------------------------
 
 test_surfaces_failure() {
@@ -175,10 +245,11 @@ test_requires_repo() {
     || nope "expected exit 2 for missing TARGET_REPO, got $rc"
 }
 
-echo "test_clone_run_land";  test_clone_run_land
-echo "test_update_existing"; test_update_existing
+echo "test_clone_run_land";   test_clone_run_land
+echo "test_update_existing";  test_update_existing
+echo "test_dirty_tree_hygiene"; test_dirty_tree_hygiene
 echo "test_surfaces_failure"; test_surfaces_failure
-echo "test_requires_repo";   test_requires_repo
+echo "test_requires_repo";    test_requires_repo
 
 echo
 echo "passed: $PASS, failed: $FAIL"

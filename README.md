@@ -13,8 +13,12 @@ current state:
 The tracer bullet: a single, non-repeating run that drives one `/implement`
 invocation against a configured target repo end-to-end, then exits.
 
-It ensures a local checkout of the configured branch (cloning if absent,
-fast-forwarding if present) and runs
+It ensures a local checkout of the configured branch — cloning if absent, or on
+an existing checkout discarding any crash leftovers (`git reset --hard` +
+`git clean -fd`) before fast-forwarding, so an incomplete slice can't wedge the
+loop or block the pull. This is safe because the loop owns the isolated checkout
+and slice work is atomic-per-commit; the cleanup only touches the working tree
+and never rewrites committed history. It then runs
 `claude -p "/implement" --dangerously-skip-permissions` inside it. The target
 repo carries its own `/implement` skill, `slice-lander` agent, `CLAUDE.md`, and
 `kanban-board/` columns — the runner provides none of them and modifies nothing;

@@ -31,12 +31,24 @@ CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 # --- Steps -------------------------------------------------------------------
 
 # Ensure a local checkout of TARGET_BRANCH exists and is up to date. Clones when
-# absent; fetches and fast-forwards when already present.
+# absent; on an existing checkout, discards any crash leftovers (dirty-tree
+# hygiene) and then fast-forwards.
+#
+# Before pulling, `git reset --hard` + `git clean -fd` throw away any uncommitted
+# changes and untracked files so an incomplete slice left by a crashed run can't
+# wedge the loop or block the fast-forward ("would be overwritten" / dirty-tree
+# failure). This is safe because the loop owns this isolated checkout and slice
+# work is atomic-per-commit — anything uncommitted is an incomplete slice that
+# re-runs from its `02-in-progress/` marker. The cleanup is scoped to this
+# checkout and only touches the working tree; committed history on the branch is
+# never rewritten (no rebase/amend/force).
 ensure_checkout() {
   if [ -d "$CHECKOUT_DIR/.git" ]; then
     log "updating existing checkout at $CHECKOUT_DIR"
     git -C "$CHECKOUT_DIR" fetch --quiet origin "$TARGET_BRANCH"
     git -C "$CHECKOUT_DIR" checkout --quiet "$TARGET_BRANCH"
+    git -C "$CHECKOUT_DIR" reset --hard --quiet
+    git -C "$CHECKOUT_DIR" clean -fd --quiet
     git -C "$CHECKOUT_DIR" pull --ff-only --quiet origin "$TARGET_BRANCH"
   else
     log "cloning $TARGET_REPO (branch $TARGET_BRANCH) into $CHECKOUT_DIR"
