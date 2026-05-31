@@ -13,9 +13,12 @@
 #   TARGET_BRANCH  branch to work on                       (default: main)
 #   CHECKOUT_DIR   where the local checkout lives          (default: $HOME/.coder/checkout)
 #   CLAUDE_BIN     Claude CLI binary (overridable for tests) (default: claude)
+#   RUN_TIMEOUT    max wall-clock for one /implement run    (default: 30m)
+#   RUN_KILL_AFTER grace before SIGKILL if it ignores SIGTERM (default: 30s)
 #
 # Exit status is the `/implement` run's status, so a caller (or the future loop)
-# can tell whether the run succeeded.
+# can tell whether the run succeeded. A run that exceeds RUN_TIMEOUT is killed and
+# exits non-zero (124), so the caller sees it as a failed attempt.
 
 set -euo pipefail
 
@@ -27,6 +30,8 @@ TARGET_REPO="${TARGET_REPO:-}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
 CHECKOUT_DIR="${CHECKOUT_DIR:-$HOME/.coder/checkout}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+RUN_TIMEOUT="${RUN_TIMEOUT:-30m}"
+RUN_KILL_AFTER="${RUN_KILL_AFTER:-30s}"
 
 # --- Steps -------------------------------------------------------------------
 
@@ -64,12 +69,26 @@ ensure_checkout() {
 # With no argument, runs the no-slug form (drains the lowest `02-refined/`
 # story). With a slug argument, runs `/implement <slug>` to resume that specific
 # story (used by the loop to recover a story stranded in `03-in-progress/`).
+#
+# The run is bounded by `timeout` so a hung session can't stall the loop forever:
+# after RUN_TIMEOUT it is sent SIGTERM, and if it does not exit within
+# RUN_KILL_AFTER it is SIGKILLed. A timed-out run exits non-zero (124), which the
+# caller already treats as a failed attempt — the same signal the quarantine
+# logic later consumes.
 run_implement() {
   local slug="${1:-}"
   local prompt="/implement"
   [ -n "$slug" ] && prompt="/implement $slug"
-  log "running $prompt in $CHECKOUT_DIR"
-  ( cd "$CHECKOUT_DIR" && "$CLAUDE_BIN" -p "$prompt" --dangerously-skip-permissions )
+  log "running $prompt in $CHECKOUT_DIR (timeout $RUN_TIMEOUT, kill after $RUN_KILL_AFTER)"
+  local status=0
+  ( cd "$CHECKOUT_DIR" \
+      && timeout --kill-after="$RUN_KILL_AFTER" "$RUN_TIMEOUT" \
+           "$CLAUDE_BIN" -p "$prompt" --dangerously-skip-permissions ) || status=$?
+  # timeout exits 124 (SIGTERM) or 137 (SIGKILL after the grace) on a hang.
+  case "$status" in
+    124|137) log "run exceeded $RUN_TIMEOUT and was terminated (counts as a failed attempt)" ;;
+  esac
+  return "$status"
 }
 
 main() {

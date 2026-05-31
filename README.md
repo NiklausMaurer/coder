@@ -24,14 +24,21 @@ repo carries its own `/implement` skill, `slice-lander` agent, `CLAUDE.md`, and
 `kanban-board/` columns — the runner provides none of them and modifies nothing;
 `/implement` commits, pushes, and parks per its own rules.
 
+The `claude -p` run is wrapped in a `timeout` (`RUN_TIMEOUT`, default 30m) so a
+hung session can't stall the loop forever. A run that exceeds the limit is sent
+SIGTERM — and SIGKILLed after `RUN_KILL_AFTER` if it ignores that — and exits
+non-zero (124), so callers (and the loop) see it as a failed attempt.
+
 ### Configuration (environment)
 
-| Variable        | Required | Default                | Meaning                              |
-| --------------- | -------- | ---------------------- | ------------------------------------ |
-| `TARGET_REPO`   | yes      | —                      | git remote URL of the target repo    |
-| `TARGET_BRANCH` | no       | `main`                 | branch to work on                    |
-| `CHECKOUT_DIR`  | no       | `$HOME/.coder/checkout`| where the local checkout lives       |
-| `CLAUDE_BIN`    | no       | `claude`               | Claude CLI binary (override in tests)|
+| Variable         | Required | Default                | Meaning                                   |
+| ---------------- | -------- | ---------------------- | ----------------------------------------- |
+| `TARGET_REPO`    | yes      | —                      | git remote URL of the target repo         |
+| `TARGET_BRANCH`  | no       | `main`                 | branch to work on                         |
+| `CHECKOUT_DIR`   | no       | `$HOME/.coder/checkout`| where the local checkout lives            |
+| `CLAUDE_BIN`     | no       | `claude`               | Claude CLI binary (override in tests)     |
+| `RUN_TIMEOUT`    | no       | `30m`                  | max wall-clock for one `/implement` run   |
+| `RUN_KILL_AFTER` | no       | `30s`                  | grace before SIGKILL if it ignores SIGTERM|
 
 ### Run
 

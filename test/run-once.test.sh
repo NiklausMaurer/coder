@@ -230,6 +230,60 @@ test_surfaces_failure() {
     || nope "expected exit 7, got $rc"
 }
 
+# --- Test: per-run timeout kills a hung run ----------------------------------
+#
+# Slice 05: a single /implement run is wrapped in a timeout so a hung session
+# can't stall the loop. A stub that hangs past the limit must be killed at the
+# limit and reported as a failed attempt (non-zero exit), not left running.
+
+test_per_run_timeout() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base")"
+  local stub="$base/stub"; mkdir -p "$stub"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+
+  # A fake claude that hangs forever (until signalled). `exec tail -f` replaces
+  # the process so timeout's SIGTERM kills it cleanly; the line after exec — the
+  # "finished" marker — is never reached, proving it was terminated mid-run.
+  cat > "$stub/claude" <<'EOF'
+#!/usr/bin/env bash
+printf 'started\n' >> "$RUN_LOG"
+exec tail -f /dev/null
+printf 'finished\n' >> "$RUN_LOG"
+EOF
+  chmod +x "$stub/claude"
+
+  local start end elapsed
+  start="$(date +%s)"
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  RUN_TIMEOUT=2 RUN_KILL_AFTER=1 \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+  end="$(date +%s)"
+  elapsed=$((end - start))
+
+  [ "$rc" -ne 0 ] \
+    && ok "a timed-out run is reported as a failed attempt (non-zero exit)" \
+    || nope "expected non-zero exit on timeout, got $rc"
+
+  # Killed at the ~2s limit, not left to hang indefinitely.
+  [ "$elapsed" -lt 15 ] \
+    && ok "the hung run is killed at the limit (${elapsed}s elapsed)" \
+    || nope "run was not killed at the limit (${elapsed}s elapsed)"
+
+  grep -qx "started" "$RUN_LOG" \
+    && ok "the hung run actually started" \
+    || nope "stub never started"
+
+  ! grep -qx "finished" "$RUN_LOG" \
+    && ok "the hung run was terminated mid-run, not left to complete" \
+    || nope "hung run completed despite the timeout"
+}
+
 # --- Test: missing config ----------------------------------------------------
 
 test_requires_repo() {
@@ -249,6 +303,7 @@ echo "test_clone_run_land";   test_clone_run_land
 echo "test_update_existing";  test_update_existing
 echo "test_dirty_tree_hygiene"; test_dirty_tree_hygiene
 echo "test_surfaces_failure"; test_surfaces_failure
+echo "test_per_run_timeout"; test_per_run_timeout
 echo "test_requires_repo";    test_requires_repo
 
 echo

@@ -199,6 +199,74 @@ test_idle_no_work() {
     || nope "unexpected sleep sequence: [$seq]"
 }
 
+# --- Test: a timed-out run is a failed attempt; the loop keeps going ----------
+#
+# Slice 05: when a run hangs past RUN_TIMEOUT it is killed and counts as a failed
+# attempt. The loop must log the failure and continue to the next iteration
+# rather than stalling. The hung story is never landed, so the column stays full.
+
+test_timeout_continues_loop() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base" 1)"
+  local stub="$base/stub"; mkdir -p "$stub"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export SLEEP_LOG="$base/sleep.log"; : > "$SLEEP_LOG"
+
+  # A fake claude that hangs forever (until signalled), plus the recording sleep
+  # stub. `exec tail -f` (not the stubbed `sleep`) gives a genuine block that
+  # timeout must kill; the loop's own adaptive sleeps still resolve instantly.
+  cat > "$stub/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RUN_LOG"
+exec tail -f /dev/null
+EOF
+  chmod +x "$stub/claude"
+  cat > "$stub/sleep" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$SLEEP_LOG"
+EOF
+  chmod +x "$stub/sleep"
+
+  local start end elapsed
+  start="$(date +%s)"
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  RUN_TIMEOUT=1 RUN_KILL_AFTER=1 \
+  WORK_SLEEP=3 IDLE_SLEEP=60 \
+  MAX_ITERATIONS=2 \
+  PATH="$stub:$PATH" \
+    bash "$LOOP" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+  end="$(date +%s)"
+  elapsed=$((end - start))
+
+  [ "$rc" -eq 0 ] && ok "loop exits 0 after timed-out iterations" || nope "expected exit 0, got $rc"
+
+  # Both iterations ran (the loop did not stall on the first hang)...
+  local runs; runs="$(wc -l < "$RUN_LOG" | tr -d '[:space:]')"
+  [ "$runs" -eq 2 ] \
+    && ok "loop continues to the next iteration after a timed-out run" \
+    || nope "expected 2 invocations across 2 iterations, got $runs"
+
+  # ...and each was killed at the ~1s limit, not left hanging.
+  [ "$elapsed" -lt 20 ] \
+    && ok "each hung run is killed at the timeout (${elapsed}s for 2 iterations)" \
+    || nope "runs were not killed at the limit (${elapsed}s elapsed)"
+
+  grep -q "continuing to next iteration" "$base/stderr.log" \
+    && ok "the timed-out run is logged as a failed attempt" \
+    || nope "loop did not log the failed attempt"
+
+  # The hung story was never landed: the column stays full.
+  local left; left="$(count_remote_refined "$remote")"
+  [ "$left" -eq 1 ] \
+    && ok "a hung run lands nothing; the story stays in the column" \
+    || nope "expected 1 refined story left, got $left"
+}
+
 # --- Test: missing config ----------------------------------------------------
 
 test_requires_repo() {
@@ -290,6 +358,7 @@ echo "test_drain_then_idle";          test_drain_then_idle
 echo "test_idle_no_work";             test_idle_no_work
 echo "test_resume_before_drain";      test_resume_before_drain
 echo "test_resume_lowest_in_progress"; test_resume_lowest_in_progress
+echo "test_timeout_continues_loop";   test_timeout_continues_loop
 echo "test_requires_repo";            test_requires_repo
 
 echo
