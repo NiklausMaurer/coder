@@ -42,6 +42,19 @@ git, not Claude's stdout, so the line is true whether the run lands one slice or
 several. A run that crashes or parks without committing reports `no slices landed
 this run`. To follow just this channel: `docker compose logs -f | grep '\[coder\]'`.
 
+For a peek *inside* a run, the runner asks Claude for `--output-format stream-json`
+and narrates the top-level subagent invocations it makes (the `/implement` skill
+delegates landing to the `slice-lander` agent), plus the final result, on stdout
+with an `[implement]` prefix:
+
+```text
+[implement] subagent slice-lander: Land the export-csv slice
+[implement] result (success): landed 2 slices, parked the rest
+```
+
+This needs `jq` (bundled in the image); the nested events the subagent itself
+emits are filtered out, so you see only the parent run's delegations.
+
 See [Deployment — Docker](#deployment--docker) for credentials, volumes, restart
 behavior, and the rest of the configuration.
 

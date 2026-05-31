@@ -143,8 +143,10 @@ test_drain_then_idle() {
     && ok "one /implement per story: 3 invocations for 3 stories" \
     || nope "expected 3 invocations, got $runs"
 
-  # Each invocation is the no-slug form (no story slug argument).
-  if grep -qx -- "-p /implement --dangerously-skip-permissions" "$RUN_LOG" \
+  # Each invocation is the no-slug form (no story slug argument). Anchored at the
+  # line start so `/implement` is immediately followed by a flag, not a slug; the
+  # trailing stream-json/verbose flags may follow.
+  if grep -q -- "^-p /implement --dangerously-skip-permissions" "$RUN_LOG" \
      && ! grep -q -- "/implement [0-9]" "$RUN_LOG"; then
     ok "invocations use the no-slug /implement form"
   else
@@ -382,7 +384,7 @@ test_resume_before_drain() {
 
   # The single iteration must resume the in-progress story, not drain refined.
   local first; first="$(head -n1 "$RUN_LOG")"
-  [ "$first" = "-p /implement 01-wip-1 --dangerously-skip-permissions" ] \
+  [[ "$first" == "-p /implement 01-wip-1 --dangerously-skip-permissions"* ]] \
     && ok "first iteration resumes in-progress story via /implement <slug>" \
     || nope "expected resume of 01-wip-1, got: [$first]"
 
@@ -421,7 +423,7 @@ test_resume_lowest_in_progress() {
     bash "$LOOP" >/dev/null 2>"$base/stderr.log"
 
   local first; first="$(head -n1 "$RUN_LOG")"
-  [ "$first" = "-p /implement 01-wip-1 --dangerously-skip-permissions" ] \
+  [[ "$first" == "-p /implement 01-wip-1 --dangerously-skip-permissions"* ]] \
     && ok "lowest NN- in-progress story (01-wip-1) is resumed first" \
     || nope "expected resume of 01-wip-1, got: [$first]"
 }
@@ -517,7 +519,7 @@ test_quarantine_after_retry_cap() {
   # After quarantine the loop proceeds to drain refined: the 4th iteration uses
   # the no-slug form (and crashes harmlessly, leaving the refined story in place).
   local fourth; fourth="$(sed -n '4p' "$RUN_LOG")"
-  [ "$fourth" = "-p /implement --dangerously-skip-permissions" ] \
+  [[ "$fourth" == "-p /implement --dangerously-skip-permissions"* ]] \
     && ok "loop proceeds to drain 02-refined after quarantine (no-slug form)" \
     || nope "expected no-slug drain on 4th iteration, got: [$fourth]"
 

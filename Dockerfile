@@ -14,9 +14,10 @@
 # without USE_BUILTIN_RIPGREP gymnastics. Node 22 satisfies the >=18 requirement.
 FROM node:22-bookworm-slim
 
-# git is used every iteration; ca-certificates for HTTPS clone/pull/push.
+# git is used every iteration; ca-certificates for HTTPS clone/pull/push; jq
+# narrates Claude's stream-json output into the loop's logs (see narrate_run).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git ca-certificates jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI (installed as root into /usr/local, runnable by any user).

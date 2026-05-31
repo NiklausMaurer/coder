@@ -62,6 +62,33 @@ ensure_checkout() {
   fi
 }
 
+# Narrate a `claude --output-format stream-json` event stream into a few
+# human-readable log lines. We run `/implement` headless, so the only window into
+# what it is doing is this stream; the bit worth surfacing is the *top-level*
+# subagent spawns (the `/implement` skill delegates landing to the `slice-lander`
+# agent), plus the final result so the log isn't otherwise silent.
+#
+# Each spawn is an `assistant` event carrying an `Agent` tool_use block; the
+# subagent's OWN nested events also stream but carry a non-null
+# `parent_tool_use_id`, so filtering on `parent_tool_use_id==null` keeps only the
+# top-level invocations. `fromjson?` tolerates any non-JSON line (e.g. a test
+# stub's plain stdout) without erroring the pipe. If `jq` is unavailable we pass
+# the raw stream through rather than swallow it.
+narrate_run() {
+  if ! command -v jq >/dev/null 2>&1; then cat; return; fi
+  jq -Rr --unbuffered '
+    (fromjson? // empty) as $e
+    | if   ($e.type=="assistant" and ($e.parent_tool_use_id==null))
+      then ($e.message.content[]?
+            | select(.type=="tool_use" and .name=="Agent")
+            | "[implement] subagent \(.input.subagent_type): \(.input.description)")
+      elif $e.type=="result"
+      then "[implement] result (\($e.subtype)): \(($e.result // "")|gsub("\n";" ")|.[0:200])"
+      else empty
+      end
+  '
+}
+
 # Run `/implement` once, headless, with permissions bypassed (nobody is present
 # to approve prompts; the container/VM is the safety boundary). Runs inside the
 # checkout so Claude picks up the target repo's own skills and kanban board.
@@ -69,6 +96,12 @@ ensure_checkout() {
 # With no argument, runs the no-slug form (drains the lowest `02-refined/`
 # story). With a slug argument, runs `/implement <slug>` to resume that specific
 # story (used by the loop to recover a story stranded in `03-in-progress/`).
+#
+# Output is requested as `stream-json --verbose` and piped through narrate_run so
+# the loop's logs show each top-level subagent invocation (see narrate_run). We
+# preserve the *claude/timeout* exit status — not jq's — via PIPESTATUS, because
+# the failed-attempt/quarantine logic keys off it (124/137 == timed out); `set
+# +e` keeps the failing pipeline from tripping `set -e` before we read it.
 #
 # The run is bounded by `timeout` so a hung session can't stall the loop forever:
 # after RUN_TIMEOUT it is sent SIGTERM, and if it does not exit within
@@ -81,9 +114,15 @@ run_implement() {
   [ -n "$slug" ] && prompt="/implement $slug"
   log "running $prompt in $CHECKOUT_DIR (timeout $RUN_TIMEOUT, kill after $RUN_KILL_AFTER)"
   local status=0
-  ( cd "$CHECKOUT_DIR" \
-      && timeout --kill-after="$RUN_KILL_AFTER" "$RUN_TIMEOUT" \
-           "$CLAUDE_BIN" -p "$prompt" --dangerously-skip-permissions ) || status=$?
+  (
+    cd "$CHECKOUT_DIR"
+    set +e
+    timeout --kill-after="$RUN_KILL_AFTER" "$RUN_TIMEOUT" \
+      "$CLAUDE_BIN" -p "$prompt" --dangerously-skip-permissions \
+        --output-format stream-json --verbose \
+      | narrate_run
+    exit "${PIPESTATUS[0]}"
+  ) || status=$?
   # timeout exits 124 (SIGTERM) or 137 (SIGKILL after the grace) on a hang.
   case "$status" in
     124|137) log "run exceeded $RUN_TIMEOUT and was terminated (counts as a failed attempt)" ;;

@@ -284,6 +284,72 @@ EOF
     || nope "hung run completed despite the timeout"
 }
 
+# --- Test: narrate top-level subagent invocations ----------------------------
+#
+# `/implement` runs headless, so the loop's only window into it is Claude's
+# `--output-format stream-json` event stream. The runner narrates the *top-level*
+# subagent spawns (the `slice-lander` agent) onto stdout while filtering out the
+# subagent's own nested events (those carry a non-null `parent_tool_use_id`).
+
+# Fake `claude` that emits a canned stream-json stream — one top-level Agent
+# spawn and one nested one — then lands a slice. Echoes the stub dir.
+make_fake_claude_streaming() {
+  local base="$1"
+  local stub="$base/stub"
+  mkdir -p "$stub"
+  cat > "$stub/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RUN_LOG"
+# Top-level subagent spawn (parent_tool_use_id null) — should be narrated.
+printf '%s\n' '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","name":"Agent","input":{"subagent_type":"slice-lander","description":"Land the slice"}}]}}'
+# Nested spawn inside the subagent (parent set) — must be filtered out.
+printf '%s\n' '{"type":"assistant","parent_tool_use_id":"toolu_abc","message":{"content":[{"type":"tool_use","name":"Agent","input":{"subagent_type":"nested-helper","description":"do not show"}}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"done landing"}'
+git config user.email implement@example.com
+git config user.name "Implement"
+printf 'done\n' > IMPLEMENTED
+git add -A
+git commit --quiet -m "land: slice done"
+git push --quiet origin HEAD:main
+EOF
+  chmod +x "$stub/claude"
+  printf '%s' "$stub"
+}
+
+test_narrates_subagent_invocations() {
+  if ! command -v jq >/dev/null 2>&1; then
+    ok "skipped — jq not installed (narration falls back to raw passthrough)"
+    return
+  fi
+
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base")"
+  local stub;   stub="$(make_fake_claude_streaming "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+    bash "$RUNNER" >"$base/stdout.log" 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] && ok "exits 0 with stream-json output" || nope "expected exit 0, got $rc"
+
+  grep -q -- "--output-format stream-json --verbose" "$RUN_LOG" \
+    && ok "requests stream-json output" \
+    || nope "did not request stream-json output"
+
+  grep -q "subagent slice-lander: Land the slice" "$base/stdout.log" \
+    && ok "narrates the top-level subagent invocation" \
+    || nope "did not narrate the top-level subagent invocation"
+
+  ! grep -q "nested-helper" "$base/stdout.log" \
+    && ok "filters out the subagent's own nested events" \
+    || nope "leaked a nested (parent_tool_use_id) event"
+}
+
 # --- Test: missing config ----------------------------------------------------
 
 test_requires_repo() {
@@ -304,6 +370,7 @@ echo "test_update_existing";  test_update_existing
 echo "test_dirty_tree_hygiene"; test_dirty_tree_hygiene
 echo "test_surfaces_failure"; test_surfaces_failure
 echo "test_per_run_timeout"; test_per_run_timeout
+echo "test_narrates_subagent_invocations"; test_narrates_subagent_invocations
 echo "test_requires_repo";    test_requires_repo
 
 echo
