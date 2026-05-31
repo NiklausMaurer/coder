@@ -301,6 +301,7 @@ test_resume_before_drain() {
   TARGET_REPO="file://$remote" \
   CHECKOUT_DIR="$base/checkout" \
   CLAUDE_BIN="$stub/claude" \
+  STATE_FILE="$base/state" \
   WORK_SLEEP=3 IDLE_SLEEP=60 \
   MAX_ITERATIONS=1 \
   PATH="$stub:$PATH" \
@@ -343,6 +344,7 @@ test_resume_lowest_in_progress() {
   TARGET_REPO="file://$remote" \
   CHECKOUT_DIR="$base/checkout" \
   CLAUDE_BIN="$stub/claude" \
+  STATE_FILE="$base/state" \
   WORK_SLEEP=3 IDLE_SLEEP=60 \
   MAX_ITERATIONS=1 \
   PATH="$stub:$PATH" \
@@ -354,10 +356,170 @@ test_resume_lowest_in_progress() {
     || nope "expected resume of 01-wip-1, got: [$first]"
 }
 
+# Count tracked rows on the remote's user-verification (quarantine) column.
+count_remote_verification() {
+  local remote="$1"
+  git --git-dir="$remote" ls-tree -r --name-only main \
+    | grep -c '^kanban-board/04-user-verification/.*/' || true
+}
+
+# Stub dir with a "poison-pill" claude that always crashes: it records the
+# invocation and exits non-zero without touching the board, so the resumed story
+# stays stranded in `03-in-progress/` — the signal the retry cap consumes. Pairs
+# with the recording `sleep`. Echoes the stub dir.
+make_poison_stubs() {
+  local base="$1"
+  local stub="$base/stub"
+  mkdir -p "$stub"
+
+  cat > "$stub/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RUN_LOG"
+exit 1
+EOF
+  chmod +x "$stub/claude"
+
+  cat > "$stub/sleep" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$SLEEP_LOG"
+EOF
+  chmod +x "$stub/sleep"
+
+  printf '%s' "$stub"
+}
+
+# --- Test: a poison-pill story is quarantined after MAX_RETRIES failed resumes -
+#
+# Slice 06: a story stranded in `03-in-progress/` whose `/implement` keeps
+# crashing must not be resumed forever. After MAX_RETRIES consecutive failed
+# resumes the loop parks it to `04-user-verification/` with a "crashed N×" note,
+# clears it from in-progress, and proceeds to drain `02-refined/`.
+
+test_quarantine_after_retry_cap() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  # 1 refined story to drain afterwards, plus 1 stranded poison story.
+  local remote; remote="$(make_fixture_remote "$base" 1 1)"
+  local stub;   stub="$(make_poison_stubs "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export SLEEP_LOG="$base/sleep.log"; : > "$SLEEP_LOG"
+
+  # 3 failed resumes -> quarantine on the 3rd; a 4th iteration then drains refined.
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  STATE_FILE="$base/state" \
+  MAX_RETRIES=3 \
+  WORK_SLEEP=3 IDLE_SLEEP=60 \
+  MAX_ITERATIONS=4 \
+  PATH="$stub:$PATH" \
+    bash "$LOOP" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] && ok "loop exits 0 across quarantine" || nope "expected exit 0, got $rc"
+
+  # The poison story was resumed exactly MAX_RETRIES times before being parked.
+  local resumes; resumes="$(grep -c -- '/implement 01-wip-1 ' "$RUN_LOG")"
+  [ "$resumes" -eq 3 ] \
+    && ok "poison story resumed exactly MAX_RETRIES (3) times, then quarantined" \
+    || nope "expected 3 resumes before quarantine, got $resumes"
+
+  # It is cleared from in-progress and lands in the verification column...
+  local wip; wip="$(count_remote_in_progress "$remote")"
+  [ "$wip" -eq 0 ] \
+    && ok "quarantined story is cleared from in-progress on the remote" \
+    || nope "expected 0 in-progress stories left, got $wip"
+
+  local verif; verif="$(count_remote_verification "$remote")"
+  [ "$verif" -ge 1 ] \
+    && ok "quarantined story is parked to 04-user-verification on the remote" \
+    || nope "expected story in 04-user-verification, got $verif rows"
+
+  # ...with a crashed-N× note.
+  if git --git-dir="$remote" show "main:kanban-board/04-user-verification/01-wip-1/QUARANTINE.md" 2>/dev/null \
+       | grep -q 'crashed 3 times'; then
+    ok "quarantine note records the crash count (3 times)"
+  else
+    nope "quarantine note missing or wrong crash count"
+  fi
+
+  # After quarantine the loop proceeds to drain refined: the 4th iteration uses
+  # the no-slug form (and crashes harmlessly, leaving the refined story in place).
+  local fourth; fourth="$(sed -n '4p' "$RUN_LOG")"
+  [ "$fourth" = "-p /implement --dangerously-skip-permissions" ] \
+    && ok "loop proceeds to drain 02-refined after quarantine (no-slug form)" \
+    || nope "expected no-slug drain on 4th iteration, got: [$fourth]"
+
+  # The counter was reset on quarantine (no lingering row for the parked slug).
+  if [ ! -s "$base/state" ] || ! grep -q '01-wip-1' "$base/state"; then
+    ok "failure counter is reset after quarantine"
+  else
+    nope "failure counter still records the quarantined slug"
+  fi
+}
+
+# --- Test: the failure counter survives a process restart ---------------------
+#
+# The count lives in a volume-persisted state file, not in memory, so a crash/
+# restart of the loop process must not reset a poison story's progress toward the
+# cap. Two failed resumes in one process, then a third in a *fresh* process, must
+# still trigger quarantine — proving the count was read back from disk.
+
+test_counter_survives_restart() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base" 0 1)"
+  local stub;   stub="$(make_poison_stubs "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export SLEEP_LOG="$base/sleep.log"; : > "$SLEEP_LOG"
+
+  local env_common=(
+    "TARGET_REPO=file://$remote"
+    "CHECKOUT_DIR=$base/checkout"
+    "CLAUDE_BIN=$stub/claude"
+    "STATE_FILE=$base/state"
+    "MAX_RETRIES=3"
+    "WORK_SLEEP=3" "IDLE_SLEEP=60"
+    "PATH=$stub:$PATH"
+  )
+
+  # Process #1: two failed resumes — count reaches 2, below the cap.
+  env "${env_common[@]}" MAX_ITERATIONS=2 \
+    bash "$LOOP" >/dev/null 2>"$base/stderr1.log"
+
+  local wip1; wip1="$(count_remote_in_progress "$remote")"
+  [ "$wip1" -eq 1 ] \
+    && ok "story still in progress after 2 failures (below cap)" \
+    || nope "expected story still in progress, got $wip1 rows"
+
+  local persisted; persisted="$(awk -F'\t' '$1=="01-wip-1"{print $2}' "$base/state")"
+  [ "$persisted" = "2" ] \
+    && ok "failure count (2) is persisted to the state file" \
+    || nope "expected persisted count 2, got: [$persisted]"
+
+  # Process #2: a single further failed resume tips it over the cap. This only
+  # quarantines if the count was read back from disk (2 -> 3); a reset-on-restart
+  # bug would leave it at 1 and never park.
+  env "${env_common[@]}" MAX_ITERATIONS=1 \
+    bash "$LOOP" >/dev/null 2>"$base/stderr2.log"
+
+  local wip2; wip2="$(count_remote_in_progress "$remote")"
+  local verif; verif="$(count_remote_verification "$remote")"
+  if [ "$wip2" -eq 0 ] && [ "$verif" -ge 1 ]; then
+    ok "one more failure after restart quarantines (count survived the restart)"
+  else
+    nope "expected quarantine after restart (in-progress=$wip2, verification=$verif)"
+  fi
+}
+
 echo "test_drain_then_idle";          test_drain_then_idle
 echo "test_idle_no_work";             test_idle_no_work
 echo "test_resume_before_drain";      test_resume_before_drain
 echo "test_resume_lowest_in_progress"; test_resume_lowest_in_progress
+echo "test_quarantine_after_retry_cap"; test_quarantine_after_retry_cap
+echo "test_counter_survives_restart";  test_counter_survives_restart
 echo "test_timeout_continues_loop";   test_timeout_continues_loop
 echo "test_requires_repo";            test_requires_repo
 

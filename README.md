@@ -67,17 +67,37 @@ sleeps adaptively — short after doing work (drain a full column fast), long wh
 idle (poll for freshly pushed work). The board, not Claude's stdout, is the
 work/idle signal, and exactly one story is attempted per pull.
 
+#### Retry cap → quarantine
+
+A story whose `/implement` keeps crashing (rather than cleanly parking or
+completing) would otherwise be resumed forever, burning usage. After resuming a
+story the loop checks the board: if the story is **still** in
+`03-in-progress/`, the run crashed or timed out without finishing — a failed
+attempt. Consecutive failed attempts per story slug are tallied in a
+volume-persisted state file (`STATE_FILE`), so the count survives a process
+restart. A clean park to `04-user-verification/` or a successful completion (the
+story leaves `03-in-progress/`) clears the count.
+
+Once a story reaches `MAX_RETRIES` consecutive failures, the loop **quarantines**
+it: it parks the folder to `kanban-board/04-user-verification/` with a
+`QUARANTINE.md` "crashed N×" note, commits and pushes that, and resets the count.
+This reuses the existing human-needed column instead of inventing a new board
+state, and clears `03-in-progress/` so the loop keeps draining `02-refined/`.
+
 ### Configuration (environment)
 
 In addition to the run-once variables above:
 
-| Variable             | Default                     | Meaning                                  |
-| -------------------- | --------------------------- | ---------------------------------------- |
-| `WORK_SLEEP`         | `5`                         | seconds to sleep after a work iteration  |
-| `IDLE_SLEEP`         | `60`                        | seconds to sleep after an idle iteration |
-| `KANBAN_REFINED`     | `kanban-board/02-refined`   | refined column path within the repo      |
-| `KANBAN_IN_PROGRESS` | `kanban-board/03-in-progress`| in-progress column path within the repo |
-| `MAX_ITERATIONS`     | _(empty)_                   | stop after N iterations; empty = forever |
+| Variable              | Default                          | Meaning                                            |
+| --------------------- | -------------------------------- | -------------------------------------------------- |
+| `WORK_SLEEP`          | `5`                              | seconds to sleep after a work iteration            |
+| `IDLE_SLEEP`          | `60`                             | seconds to sleep after an idle iteration           |
+| `KANBAN_REFINED`      | `kanban-board/02-refined`        | refined column path within the repo                |
+| `KANBAN_IN_PROGRESS`  | `kanban-board/03-in-progress`    | in-progress column path within the repo            |
+| `KANBAN_VERIFICATION` | `kanban-board/04-user-verification` | user-verification (quarantine) column path      |
+| `MAX_RETRIES`         | `3`                              | consecutive failed resumes before quarantine       |
+| `STATE_FILE`          | `$HOME/.coder/state/retry-counts`| volume-persisted per-slug failure counts           |
+| `MAX_ITERATIONS`      | _(empty)_                        | stop after N iterations; empty = forever           |
 
 ### Run
 
