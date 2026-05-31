@@ -1,0 +1,38 @@
+# One service = one container = one target repo. To drive more repos, run more
+# stacks (e.g. `docker compose -p coder-otherrepo --env-file other.env up -d`),
+# each with its own volumes.
+#
+# Required environment (pass via an .env file next to this compose file, or the
+# shell): TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT. Everything else has a
+# sane default baked into the loop — uncomment below to override.
+services:
+  coder:
+    build: .
+    image: coder
+    # Keep the loop running across crashes and host reboots; a manual `stop`
+    # stays stopped.
+    restart: unless-stopped
+    environment:
+      TARGET_REPO: ${TARGET_REPO:?set TARGET_REPO to the target repo's git remote URL}
+      TARGET_BRANCH: ${TARGET_BRANCH:-main}
+      # Claude subscription token from `claude setup-token` (NOT an API key).
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN}
+      # Scoped HTTPS PAT for the target repo (pull/push).
+      GIT_PAT: ${GIT_PAT:?set GIT_PAT}
+      # --- Optional tuning (defaults shown; uncomment to override) ---
+      # WORK_SLEEP: "5"
+      # IDLE_SLEEP: "60"
+      # MAX_RETRIES: "3"
+      # RUN_TIMEOUT: "30m"
+      # GIT_USERNAME: "x-access-token"
+      # GIT_USER_NAME: "coder (autonomous loop)"
+      # GIT_USER_EMAIL: "coder@autonomous-loop"
+    volumes:
+      # Persist the checkout (no re-clone on restart) and the retry-count state
+      # (quarantine counts survive restarts).
+      - checkout:/data/checkout
+      - state:/data/state
+
+volumes:
+  checkout:
+  state:

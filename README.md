@@ -114,3 +114,87 @@ bash test/loop.test.sh
 
 Self-contained bash harnesses (no `bats`) that build fixture git repos and stub
 the Claude CLI (and `sleep`) to exercise the runner and loop end-to-end.
+
+## Deployment — Docker
+
+The loop ships as a Docker image: one container per target repo. The image
+([`Dockerfile`](Dockerfile)) bundles `git` + the Claude Code CLI on a Node 22
+base and runs the loop as its entrypoint. Scaling to more repos means running
+more containers, each fully isolated.
+
+The image runs as a **non-root** user on purpose — `claude
+--dangerously-skip-permissions` refuses to run as root, and the container plus
+its volumes (no prod credentials, a repo-scoped git PAT, a disposable checkout)
+are the real safety boundary.
+
+### Volumes
+
+Two paths are backed by volumes so they survive container restarts:
+
+| Mount point      | Env var (default)             | Why it persists                                              |
+| ---------------- | ----------------------------- | ----------------------------------------------------------- |
+| `/data/checkout` | `CHECKOUT_DIR` (`=/data/checkout`) | a restart reuses the checkout instead of a full re-clone (the per-iteration hard-reset + pull keeps it clean) |
+| `/data/state`    | `STATE_FILE` (`=/data/state/retry-counts`) | a quarantined poison-pill's consecutive-failure count survives restarts |
+
+[`docker-compose.yml`](docker-compose.yml) declares both as named volumes and
+sets `restart: unless-stopped`, so the loop comes back after a crash or host
+reboot (a manual `stop` stays stopped). For a bare `docker run`, pass
+`--restart unless-stopped -v coder-checkout:/data/checkout -v
+coder-state:/data/state`.
+
+### Credentials
+
+Wired entirely through the environment by
+[`bin/docker-entrypoint.sh`](bin/docker-entrypoint.sh), which configures git and
+then execs the loop:
+
+- **Claude (subscription login).** On a trusted machine run `claude setup-token`
+  once — it walks through an interactive OAuth login and prints a long-lived
+  (~1-year) token tied to your Max/Pro plan's *included* usage (not a metered
+  `ANTHROPIC_API_KEY` bill). Supply it to the container as
+  `CLAUDE_CODE_OAUTH_TOKEN`; the `claude` CLI consumes it directly.
+  - Caveats (per [design.md](design.md)): the token eventually expires and needs
+    re-running `setup-token`, and a busy loop draws from the same plan allowance
+    as your interactive Claude usage.
+- **Git push/pull (scoped HTTPS PAT).** Create a Personal Access Token scoped to
+  just the target repo and pass it as `GIT_PAT` (with optional `GIT_USERNAME`,
+  default `x-access-token`). The entrypoint writes it into git's credential
+  store keyed to `TARGET_REPO`'s host, so every git call authenticates without
+  the token ever landing in a remote URL or in `argv`. Rotate/revoke per repo.
+- **Committer identity.** `GIT_USER_NAME` / `GIT_USER_EMAIL` (sane defaults) are
+  set globally so the commits `/implement` makes in the target repo succeed in
+  an otherwise-fresh container.
+
+### Run
+
+```sh
+# 1. Authenticate once on a trusted machine and capture the token.
+claude setup-token            # prints CLAUDE_CODE_OAUTH_TOKEN
+
+# 2. Provide config + secrets (e.g. an .env file beside docker-compose.yml):
+#    TARGET_REPO=https://github.com/you/your-repo.git
+#    CLAUDE_CODE_OAUTH_TOKEN=...
+#    GIT_PAT=...
+docker compose up -d --build
+docker compose logs -f
+```
+
+To verify persistence: let the loop drain the target repo's `02-refined/`
+column, then `docker compose restart`. The logs show `updating existing
+checkout` (not `cloning`), and `/data/state/retry-counts` still carries any
+recorded failure counts.
+
+### State file format
+
+`STATE_FILE` is a flat, tab-separated table — one line per tracked story,
+`<slug>\t<consecutive-failure-count>`:
+
+```
+04-flaky-story	2
+07-wedged-story	1
+```
+
+A clean park or completion drops the slug's line; quarantine resets it. The
+format is deliberately structured and externally readable so the deferred v2
+HTTP observability endpoint (see [design.md](design.md)) can expose retry counts
+without re-architecting how the loop persists them.

@@ -1,0 +1,9 @@
+# The image only needs bin/. Keep the build context tiny and reproducible.
+.git
+.idea
+test
+slices
+*.md
+docker-compose.yml
+.dockerignore
+.gitignore
