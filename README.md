@@ -5,8 +5,33 @@ a target repository via the [nikos](../nikos) `/implement` process, parking
 anything that needs a human, then polls for more. See [problem.md](problem.md)
 and [design.md](design.md) for the full statement and design.
 
-The loop is built up slice by slice (see [`slices/`](slices)). This is the
-current state:
+## Quick start
+
+Run one container per target repo with Docker Compose:
+
+```sh
+# 1. One-time: generate a Claude subscription token on a trusted machine.
+claude setup-token            # prints CLAUDE_CODE_OAUTH_TOKEN
+
+# 2. Configure. Fill in the three required keys; everything else has defaults.
+cp .env.example .env
+$EDITOR .env                  # TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT
+
+# 3. Build and run in the background.
+docker compose up -d --build
+docker compose logs -f        # watch the loop drain the board
+```
+
+That's it — the loop clones the target repo into a persistent volume and starts
+draining its `kanban-board/02-refined` column. To stop it: `docker compose down`
+(the checkout and retry-count volumes persist; add `-v` to wipe them).
+
+See [Deployment — Docker](#deployment--docker) for credentials, volumes, restart
+behavior, and the rest of the configuration.
+
+---
+
+The loop is built up slice by slice. This is the current state:
 
 ## `bin/run-once.sh` — one-shot iteration runner
 
@@ -165,26 +190,13 @@ then execs the loop:
   set globally so the commits `/implement` makes in the target repo succeed in
   an otherwise-fresh container.
 
-### Run
+### Configuration file
 
-```sh
-# 1. Authenticate once on a trusted machine and capture the token.
-claude setup-token            # prints CLAUDE_CODE_OAUTH_TOKEN
-
-# 2. Provide config + secrets. Copy the template and fill in the three required
-#    keys (TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT); the rest have defaults.
-cp .env.example .env
-$EDITOR .env
-
-# 3. Bring up the stack. docker compose loads .env automatically.
-docker compose up -d --build
-docker compose logs -f
-```
-
-`docker-compose.yml` loads `.env` via `env_file` with `required: false`, so the
-file is optional — if you'd rather inject the variables from the shell or an
-orchestrator, the stack still comes up without it. `.env` is git-ignored;
-`.env.example` is the committed template.
+The [Quick start](#quick-start) covers the commands. Configuration comes from a
+`.env` file (copy [`.env.example`](.env.example)): `docker-compose.yml` loads it
+via `env_file` with `required: false`, so it's optional — if you'd rather inject
+the variables from the shell or an orchestrator, the stack still comes up without
+it. `.env` is git-ignored; `.env.example` is the committed template.
 
 To verify persistence: let the loop drain the target repo's `02-refined/`
 column, then `docker compose restart`. The logs show `updating existing
