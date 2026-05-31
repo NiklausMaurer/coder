@@ -26,6 +26,22 @@ That's it — the loop clones the target repo into a persistent volume and start
 draining its `kanban-board/02-refined` column. To stop it: `docker compose down`
 (the checkout and retry-count volumes persist; add `-v` to wipe them).
 
+Watching the logs you'll see two channels. Operational plumbing (checkout, sleep,
+retries) is logged with a `[loop]`/`[run-once]` prefix on **stderr**; the work
+narration you usually care about is on **stdout** with a `[coder]` prefix:
+
+```text
+[coder] working on story: 03-export-csv (draining refined column)
+[coder] landed slice: a1b2c3d add csv column mapping
+[coder] landed slice: e4f5a6b stream rows to the response
+```
+
+Each story is named before its run (on both the resume and the no-slug drain
+path), and each landed slice is read straight from the commits the run pushed —
+git, not Claude's stdout, so the line is true whether the run lands one slice or
+several. A run that crashes or parks without committing reports `no slices landed
+this run`. To follow just this channel: `docker compose logs -f | grep '\[coder\]'`.
+
 See [Deployment — Docker](#deployment--docker) for credentials, volumes, restart
 behavior, and the rest of the configuration.
 

@@ -63,6 +63,14 @@ source "$SCRIPT_DIR/run-once.sh"
 # Re-point logging at the loop while reusing run-once's helpers.
 log() { printf '[loop] %s\n' "$*" >&2; }
 
+# Human-facing progress narration — which story the loop is working on and which
+# slices it lands — emitted to *stdout*, deliberately separate from log()'s
+# operational/plumbing output on stderr. This lets you watch just the work signal
+# (e.g. `docker compose logs` or a `tee`) without the checkout/sleep/retry noise.
+# Both channels are board/git-derived; neither parses Claude's stdout (invariant
+# #1: the board, never Claude's stdout, is the signal).
+progress() { printf '[coder] %s\n' "$*"; }
+
 # --- Configuration -----------------------------------------------------------
 
 WORK_SLEEP="${WORK_SLEEP:-5}"
@@ -87,16 +95,44 @@ count_refined() {
   find "$dir" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]'
 }
 
-# Echo the slug of the lowest `NN-` story stranded in the in-progress column, or
-# nothing if the column is empty/absent. A story is an immediate subdirectory of
-# the column (e.g. `03-some-story/`).
-in_progress_story() {
-  local dir="$CHECKOUT_DIR/$KANBAN_IN_PROGRESS"
+# Echo the slug of the lowest `NN-` story directory in a kanban column (relative
+# path within the repo), or nothing if the column is empty/absent. A story is an
+# immediate subdirectory (e.g. `03-some-story/`); the `NN-` prefix orders them, so
+# the lowest is the one worked next.
+lowest_story() {
+  local dir="$CHECKOUT_DIR/$1"
   [ -d "$dir" ] || return 0
   local lowest
   lowest="$(find "$dir" -mindepth 1 -maxdepth 1 -type d | sort | head -n1)"
   [ -n "$lowest" ] && basename "$lowest"
   return 0
+}
+
+# The story a resume (lowest stranded in-progress) and a drain (lowest refined)
+# would pick next — so each work iteration can announce its story by name before
+# running, including the no-slug drain path where Claude, not the loop, chooses.
+in_progress_story() { lowest_story "$KANBAN_IN_PROGRESS"; }
+refined_story()     { lowest_story "$KANBAN_REFINED"; }
+
+# Echo the checkout's current HEAD sha (empty before the first checkout exists).
+head_sha() { git -C "$CHECKOUT_DIR" rev-parse HEAD 2>/dev/null || true; }
+
+# Narrate the slices a run landed. Slice work is atomic-per-commit and the run
+# commits + pushes into this checkout, so every commit added since `before` (the
+# HEAD captured before the run) is one slice that landed — read straight from git,
+# not Claude's stdout. A crashed or cleanly-parked run that committed nothing
+# leaves HEAD unmoved and says so.
+log_landed_slices() {
+  local before="$1"
+  local after; after="$(head_sha)"
+  if [ -z "$before" ] || [ "$before" = "$after" ]; then
+    progress "no slices landed this run"
+    return
+  fi
+  local line
+  while IFS= read -r line; do
+    progress "landed slice: $line"
+  done < <(git -C "$CHECKOUT_DIR" log --format='%h %s' "$before..$after")
 }
 
 do_sleep() {
@@ -196,19 +232,27 @@ handle_resume_outcome() {
 iterate() {
   ensure_checkout
 
+  # HEAD before the run, so log_landed_slices can name the slices it commits.
+  local before
+  before="$(head_sha)"
+
   local resume
   resume="$(in_progress_story)"
   if [ -n "$resume" ]; then
+    progress "working on story: $resume (resuming stranded in-progress story)"
     log "resuming stranded in-progress story: $resume"
     if ! run_implement "$resume"; then
       log "implement run failed; continuing to next iteration"
     fi
+    log_landed_slices "$before"
     handle_resume_outcome "$resume"
     do_sleep "$WORK_SLEEP" work
   elif [ "$(count_refined)" -gt 0 ]; then
+    progress "working on story: $(refined_story) (draining refined column)"
     if ! run_implement; then
       log "implement run failed; continuing to next iteration"
     fi
+    log_landed_slices "$before"
     do_sleep "$WORK_SLEEP" work
   else
     log "no in-progress or refined stories; idle"

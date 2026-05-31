@@ -267,6 +267,76 @@ EOF
     || nope "expected 1 refined story left, got $left"
 }
 
+# --- Test: stdout narrates the story and the slices it lands ------------------
+#
+# The loop announces the story it is working on (by name, on both the resume and
+# the no-slug drain path) and each slice it lands, on *stdout* — separate from the
+# operational log on stderr. Slice lines are git-derived (one per commit the run
+# pushed), not parsed from Claude's output.
+
+test_progress_narrates_story_and_slices() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base" 1)"
+  local stub;   stub="$(make_stubs "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export SLEEP_LOG="$base/sleep.log"; : > "$SLEEP_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  WORK_SLEEP=3 IDLE_SLEEP=60 \
+  MAX_ITERATIONS=1 \
+  PATH="$stub:$PATH" \
+    bash "$LOOP" >"$base/stdout.log" 2>/dev/null
+
+  # The drain path names the story it picked (the loop, not just Claude, says so).
+  grep -q '^\[coder\] working on story: 01-story-1 (draining refined column)$' "$base/stdout.log" \
+    && ok "stdout announces the story being drained, by name" \
+    || nope "stdout did not announce the drained story"
+
+  # The landed slice is reported from the commit the run pushed (subject + sha).
+  grep -Eq '^\[coder\] landed slice: [0-9a-f]+ land: 01-story-1$' "$base/stdout.log" \
+    && ok "stdout reports the landed slice from the new commit" \
+    || nope "stdout did not report the landed slice"
+
+  # Narration goes to stdout, not the stderr plumbing channel.
+  grep -q '^\[coder\]' "$base/stdout.log" \
+    && ! grep -q '^\[loop\]' "$base/stdout.log" \
+    && ok "progress narration is on stdout, separate from log() on stderr" \
+    || nope "progress/log channels are not cleanly separated"
+}
+
+# --- Test: a run that lands nothing says so -----------------------------------
+#
+# An idle iteration (empty board) does no run; a work iteration whose run commits
+# nothing must report "no slices landed" rather than inventing slice lines. Here
+# the poison stub crashes without touching the board, so HEAD never moves.
+
+test_progress_no_slices_when_nothing_lands() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base" 0 1)"
+  local stub;   stub="$(make_poison_stubs "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export SLEEP_LOG="$base/sleep.log"; : > "$SLEEP_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  STATE_FILE="$base/state" \
+  WORK_SLEEP=3 IDLE_SLEEP=60 \
+  MAX_ITERATIONS=1 \
+  PATH="$stub:$PATH" \
+    bash "$LOOP" >"$base/stdout.log" 2>/dev/null
+
+  grep -q '^\[coder\] no slices landed this run$' "$base/stdout.log" \
+    && ok "a run that commits nothing reports no slices landed" \
+    || nope "expected a 'no slices landed' line on stdout"
+}
+
 # --- Test: missing config ----------------------------------------------------
 
 test_requires_repo() {
@@ -521,6 +591,8 @@ echo "test_resume_lowest_in_progress"; test_resume_lowest_in_progress
 echo "test_quarantine_after_retry_cap"; test_quarantine_after_retry_cap
 echo "test_counter_survives_restart";  test_counter_survives_restart
 echo "test_timeout_continues_loop";   test_timeout_continues_loop
+echo "test_progress_narrates_story_and_slices"; test_progress_narrates_story_and_slices
+echo "test_progress_no_slices_when_nothing_lands"; test_progress_no_slices_when_nothing_lands
 echo "test_requires_repo";            test_requires_repo
 
 echo
