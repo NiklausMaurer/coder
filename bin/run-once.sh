@@ -48,9 +48,16 @@ ensure_checkout() {
 # Run `/implement` once, headless, with permissions bypassed (nobody is present
 # to approve prompts; the container/VM is the safety boundary). Runs inside the
 # checkout so Claude picks up the target repo's own skills and kanban board.
+#
+# With no argument, runs the no-slug form (drains the lowest `02-refined/`
+# story). With a slug argument, runs `/implement <slug>` to resume that specific
+# story (used by the loop to recover a story stranded in `03-in-progress/`).
 run_implement() {
-  log "running /implement in $CHECKOUT_DIR"
-  ( cd "$CHECKOUT_DIR" && "$CLAUDE_BIN" -p "/implement" --dangerously-skip-permissions )
+  local slug="${1:-}"
+  local prompt="/implement"
+  [ -n "$slug" ] && prompt="/implement $slug"
+  log "running $prompt in $CHECKOUT_DIR"
+  ( cd "$CHECKOUT_DIR" && "$CLAUDE_BIN" -p "$prompt" --dangerously-skip-permissions )
 }
 
 main() {

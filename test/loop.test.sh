@@ -18,9 +18,11 @@ ok()   { printf '  ok   - %s\n' "$1"; PASS=$((PASS + 1)); }
 nope() { printf '  FAIL - %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
 # Build a bare remote with `main` carrying a refined column of N stories
-# (01-story-1 .. 0N-story-N) plus a .claude marker. Echoes the bare remote path.
+# (01-story-1 .. 0N-story-N) plus a .claude marker. An optional third argument
+# seeds M stories into the in-progress column (01-wip-1 .. 0M-wip-M), simulating
+# stories stranded by a crashed/killed previous run. Echoes the bare remote path.
 make_fixture_remote() {
-  local base="$1" n="$2"
+  local base="$1" n="$2" in_progress="${3:-0}"
   local remote="$base/remote.git"
   local seed="$base/seed"
 
@@ -35,6 +37,10 @@ make_fixture_remote() {
     mkdir -p "$seed/kanban-board/02-refined/0${i}-story-${i}"
     printf 'story %s\n' "$i" > "$seed/kanban-board/02-refined/0${i}-story-${i}/story.md"
   done
+  for i in $(seq 1 "$in_progress"); do
+    mkdir -p "$seed/kanban-board/03-in-progress/0${i}-wip-${i}"
+    printf 'wip %s\n' "$i" > "$seed/kanban-board/03-in-progress/0${i}-wip-${i}/story.md"
+  done
   mkdir -p "$seed/.claude"
   printf 'pretend skill\n' > "$seed/.claude/marker"
   git -C "$seed" add -A
@@ -45,9 +51,13 @@ make_fixture_remote() {
   printf '%s' "$remote"
 }
 
-# Stub dir with a fake `claude` (no-slug /implement drains the lowest refined
-# story: removes it, commits, pushes) and a fake `sleep` that records durations
-# instead of waiting. Echoes the stub dir.
+# Stub dir with a fake `claude` and a fake `sleep` that records durations instead
+# of waiting. Echoes the stub dir.
+#
+# The fake `claude` mirrors the two `/implement` forms the loop drives:
+#   - no-slug `/implement`        → drain the lowest `02-refined/` story
+#   - `/implement <slug>`         → resume (complete) `03-in-progress/<slug>`
+# In both cases it removes the story folder, commits, and pushes.
 make_stubs() {
   local base="$1"
   local stub="$base/stub"
@@ -56,14 +66,30 @@ make_stubs() {
   cat > "$stub/claude" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$RUN_LOG"
-dir="kanban-board/02-refined"
-lowest="$(find "$dir" -mindepth 1 -maxdepth 1 -type d | sort | head -n1)"
-if [ -n "$lowest" ]; then
-  git rm -rq "$lowest"
-  git config user.email implement@example.com
-  git config user.name "Implement"
-  git commit --quiet -m "land: $(basename "$lowest")"
-  git push --quiet origin HEAD:main
+git config user.email implement@example.com
+git config user.name "Implement"
+
+# The value passed to -p is "$2", e.g. "/implement" or "/implement 01-wip-1".
+prompt="$2"
+slug="${prompt#/implement}"
+slug="${slug# }"
+
+if [ -n "$slug" ]; then
+  # Resume form: complete the named in-progress story.
+  target="kanban-board/03-in-progress/$slug"
+  if [ -d "$target" ]; then
+    git rm -rq "$target"
+    git commit --quiet -m "land: $slug"
+    git push --quiet origin HEAD:main
+  fi
+else
+  # No-slug drain form: land the lowest refined story.
+  lowest="$(find kanban-board/02-refined -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)"
+  if [ -n "$lowest" ]; then
+    git rm -rq "$lowest"
+    git commit --quiet -m "land: $(basename "$lowest")"
+    git push --quiet origin HEAD:main
+  fi
 fi
 EOF
   chmod +x "$stub/claude"
@@ -81,6 +107,12 @@ count_remote_refined() {
   local remote="$1"
   git --git-dir="$remote" ls-tree -r --name-only main \
     | grep -c '^kanban-board/02-refined/.*/' || true
+}
+
+count_remote_in_progress() {
+  local remote="$1"
+  git --git-dir="$remote" ls-tree -r --name-only main \
+    | grep -c '^kanban-board/03-in-progress/.*/' || true
 }
 
 # --- Test: drain a 3-story column, then settle into idle ----------------------
@@ -182,9 +214,83 @@ test_requires_repo() {
     || nope "expected exit 2 for missing TARGET_REPO, got $rc"
 }
 
-echo "test_drain_then_idle"; test_drain_then_idle
-echo "test_idle_no_work";    test_idle_no_work
-echo "test_requires_repo";   test_requires_repo
+# --- Test: resume a stranded in-progress story before draining refined --------
+#
+# Simulates crash recovery: a previous run was killed mid-story, leaving its
+# folder in `03-in-progress/`. The next iteration must resume that story (via the
+# slug form) rather than draining `02-refined/`.
+
+test_resume_before_drain() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  # 2 refined stories AND 1 stranded in-progress story.
+  local remote; remote="$(make_fixture_remote "$base" 2 1)"
+  local stub;   stub="$(make_stubs "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export SLEEP_LOG="$base/sleep.log"; : > "$SLEEP_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  WORK_SLEEP=3 IDLE_SLEEP=60 \
+  MAX_ITERATIONS=1 \
+  PATH="$stub:$PATH" \
+    bash "$LOOP" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] && ok "loop exits 0 after resuming" || nope "expected exit 0, got $rc"
+
+  # The single iteration must resume the in-progress story, not drain refined.
+  local first; first="$(head -n1 "$RUN_LOG")"
+  [ "$first" = "-p /implement 01-wip-1 --dangerously-skip-permissions" ] \
+    && ok "first iteration resumes in-progress story via /implement <slug>" \
+    || nope "expected resume of 01-wip-1, got: [$first]"
+
+  # The resumed story is cleared from in-progress on the remote...
+  local wip; wip="$(count_remote_in_progress "$remote")"
+  [ "$wip" -eq 0 ] \
+    && ok "resumed story is cleared from in-progress on the remote" \
+    || nope "expected 0 in-progress stories left, got $wip"
+
+  # ...while refined is left untouched (resume preferred over drain).
+  local refined; refined="$(count_remote_refined "$remote")"
+  [ "$refined" -eq 2 ] \
+    && ok "refined column untouched while a story was in progress" \
+    || nope "expected 2 refined stories left, got $refined"
+}
+
+# --- Test: lowest NN- in-progress story is resumed first ----------------------
+
+test_resume_lowest_in_progress() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  # Two stranded in-progress stories: 01-wip-1 and 02-wip-2.
+  local remote; remote="$(make_fixture_remote "$base" 0 2)"
+  local stub;   stub="$(make_stubs "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export SLEEP_LOG="$base/sleep.log"; : > "$SLEEP_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  WORK_SLEEP=3 IDLE_SLEEP=60 \
+  MAX_ITERATIONS=1 \
+  PATH="$stub:$PATH" \
+    bash "$LOOP" >/dev/null 2>"$base/stderr.log"
+
+  local first; first="$(head -n1 "$RUN_LOG")"
+  [ "$first" = "-p /implement 01-wip-1 --dangerously-skip-permissions" ] \
+    && ok "lowest NN- in-progress story (01-wip-1) is resumed first" \
+    || nope "expected resume of 01-wip-1, got: [$first]"
+}
+
+echo "test_drain_then_idle";          test_drain_then_idle
+echo "test_idle_no_work";             test_idle_no_work
+echo "test_resume_before_drain";      test_resume_before_drain
+echo "test_resume_lowest_in_progress"; test_resume_lowest_in_progress
+echo "test_requires_repo";            test_requires_repo
 
 echo
 echo "passed: $PASS, failed: $FAIL"
