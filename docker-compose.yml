@@ -9,6 +9,7 @@
 services:
   coder:
     build: .
+    container_name: coder
     image: coder
     # Keep the loop running across crashes and host reboots; a manual `stop`
     # stays stopped.
