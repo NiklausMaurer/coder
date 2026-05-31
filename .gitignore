@@ -1,0 +1,5 @@
+# IDE / editor
+.idea/
+
+# OS
+.DS_Store

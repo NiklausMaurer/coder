@@ -38,11 +38,39 @@ TARGET_REPO=https://github.com/you/your-repo.git bin/run-once.sh
 The runner exits with the `/implement` run's status, so callers can tell whether
 the run succeeded.
 
+## `bin/loop.sh` — continuous loop with adaptive sleep
+
+Wraps the one-shot runner in a loop that drains the refined column and backs off
+when idle. Each iteration pulls the configured branch, inspects
+`kanban-board/02-refined/` to decide whether there is work, runs at most one
+no-slug `/implement` (which drains the lowest `NN-` story) when a story exists,
+and sleeps adaptively — short after doing work (drain a full column fast), long
+when idle (poll for freshly pushed work). The board, not Claude's stdout, is the
+work/idle signal, and exactly one story is attempted per pull.
+
+### Configuration (environment)
+
+In addition to the run-once variables above:
+
+| Variable         | Default                  | Meaning                                  |
+| ---------------- | ------------------------ | ---------------------------------------- |
+| `WORK_SLEEP`     | `5`                      | seconds to sleep after a work iteration  |
+| `IDLE_SLEEP`     | `60`                     | seconds to sleep after an idle iteration |
+| `KANBAN_REFINED` | `kanban-board/02-refined`| refined column path within the repo      |
+| `MAX_ITERATIONS` | _(empty)_                | stop after N iterations; empty = forever |
+
+### Run
+
+```sh
+TARGET_REPO=https://github.com/you/your-repo.git bin/loop.sh
+```
+
 ## Tests
 
 ```sh
 bash test/run-once.test.sh
+bash test/loop.test.sh
 ```
 
-A self-contained bash harness (no `bats`) that builds fixture git repos, stubs
-the Claude CLI, and exercises the runner end-to-end.
+Self-contained bash harnesses (no `bats`) that build fixture git repos and stub
+the Claude CLI (and `sleep`) to exercise the runner and loop end-to-end.
