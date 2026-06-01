@@ -27,6 +27,32 @@ That's it — the loop clones the target repo into a persistent volume and start
 draining its `kanban-board/02-refined` column. To stop it: `docker compose down`
 (the checkout and retry-count volumes persist; add `-v` to wipe them).
 
+## How the process works
+
+The loop drains a **kanban board of stories**. A *story* is a folder under
+`kanban-board/`; refining it breaks it into thin, end-to-end **tracer-bullet
+slices** that an agent can land one at a time. Work flows left-to-right through
+the columns, mostly unattended:
+
+```
+/add-story ─▶ 01-backlog ─/refine─▶ 02-refined ─/implement─▶ 03-in-progress ─▶ done (deleted)
+                                                     │                ▲
+                                         parks blocker│                │ /accept-verification
+                                                     ▼                │
+                                            04-user-verification ──────┘
+```
+
+You fill the queue interactively (`/add-story`, then `/refine` — which grills the
+problem and slices it). The loop drains it autonomously: `/implement` claims the
+next refined story and lands its slices via a `slice-lander` subagent, pushing each
+one and **parking** anything that needs a human in `04-user-verification/`, where you
+release it with `/accept-verification`. The loop only ever runs `/implement`; the
+rest is human-driven and runs on your machine.
+
+The full newcomer's guide — stories vs slices, AFK/HITL, every column and skill — is
+**[`setup/process-kit/kanban-board/README.md`](setup/process-kit/kanban-board/README.md)**,
+which onboarding installs into each target repo's `kanban-board/`.
+
 ## Onboarding a new target repo
 
 The loop is repo-agnostic and owns no process — so a target repo must already
@@ -263,3 +289,13 @@ A clean park or completion drops the slug's line; quarantine resets it. The
 format is deliberately structured and externally readable so the deferred v2
 HTTP observability endpoint (see [design.md](design.md)) can expose retry counts
 without re-architecting how the loop persists them.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
+The onboarding kit bundles two skills from Matt Pocock's
+[Skills For Real Engineers](https://github.com/mattpocock/skills) (MIT): `grill-me`
+(verbatim) and `to-slices` (adapted from his `to-issues`). Each carries its
+attribution inline and the third-party notice is recorded in `LICENSE`. See
+[`setup/README.md`](setup/README.md#credits--licensing) for details.

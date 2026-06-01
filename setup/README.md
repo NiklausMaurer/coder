@@ -35,8 +35,13 @@ process-kit/
   .claude/skills/accept-verification/SKILL.md  # human-side resume of a parked story
   .claude/agents/slice-lander.md       # template; repo-specific blanks marked coder:autofill
   kanban-board/{01-backlog,02-refined,03-in-progress,04-user-verification}/.gitkeep
+  kanban-board/README.md               # the process guide — how the story lifecycle works
   CLAUDE.snippet.md                    # section appended to the target's root CLAUDE.md
 ```
+
+New to the process? **[`process-kit/kanban-board/README.md`](process-kit/kanban-board/README.md)**
+is the full newcomer's guide — stories, slices, AFK/HITL, the columns, and which skill
+moves work where. It's scaffolded into every onboarded repo so its users have it too.
 
 Two tiers of skill:
 
@@ -84,3 +89,18 @@ you. Secrets are read without echo; the file is written owner-only and an existi
 `.env` is backed up to `.env.bak`. See `.env.example` for the full config matrix.
 
 Then: `docker compose up -d --build`.
+
+## Credits & licensing
+
+Two skills in `process-kit/` come from Matt Pocock's
+[Skills For Real Engineers](https://github.com/mattpocock/skills) (MIT-licensed),
+re-used here under MIT:
+
+- **`grill-me`** — a verbatim copy of upstream `skills/productivity/grill-me`.
+- **`to-slices`** — adapted from upstream `skills/engineering/to-issues`, re-pointed to
+  write kanban slice files instead of publishing issues to a tracker.
+
+Each derived file carries this attribution inline (so it travels into every repo it's
+scaffolded into), and the top-level [`LICENSE`](../LICENSE) records the third-party notice
+alongside coder's own MIT license. The rest of the kit (`implement`, `slice-lander`,
+`add-story`, `refine`, `accept-verification`) and the loop are coder's own.

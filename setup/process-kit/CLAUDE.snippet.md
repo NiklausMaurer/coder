@@ -3,8 +3,9 @@
 ## Autonomous implementation loop (coder)
 
 This repo is drained by the [coder](https://github.com/NiklausMaurer/coder) autonomous loop,
-which repeatedly runs `/implement` to land refined stories. Two preconditions, scaffolded by
-`coder/setup/init-target.sh`, make that work:
+which repeatedly runs `/implement` to land refined stories. New to the process? See
+[`kanban-board/README.md`](kanban-board/README.md) for the full walkthrough. Two preconditions,
+scaffolded by `coder/setup/init-target.sh`, make the loop work:
 
 - **`.claude/skills/implement`** — orchestrates a story end-to-end: claims it from
   `kanban-board/02-refined/`, runs `slice-lander` subagents one slice at a time, pushes each

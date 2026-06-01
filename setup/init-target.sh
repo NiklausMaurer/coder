@@ -111,6 +111,9 @@ ensure_board() {
       log "created board column: $col"
     fi
   done
+  # The process guide lives next to the board so anyone browsing it learns how the
+  # whole story lifecycle works. Subject to the same no-clobber rule as the skills.
+  install_file "$KIT_DIR/kanban-board/README.md" "$TARGET_DIR/kanban-board/README.md"
 }
 
 # Append the process-kit CLAUDE.md section to the target's root CLAUDE.md, unless

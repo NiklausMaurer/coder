@@ -79,3 +79,11 @@ A concise description of this vertical slice. Describe the end-to-end behavior, 
 Or "None - can start immediately" if no blockers.
 
 </slice-template>
+
+<!--
+Attribution: adapted from `skills/engineering/to-issues` in Matt Pocock's
+"Skills For Real Engineers" (https://github.com/mattpocock/skills) — re-pointed to
+write slice files into a kanban story folder instead of publishing issues to a
+tracker. Used under the MIT License — Copyright (c) 2026 Matt Pocock.
+-->
+
