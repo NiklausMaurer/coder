@@ -48,6 +48,13 @@ test_scaffolds_a_fresh_repo() {
   [ -f "$repo/.claude/agents/slice-lander.md" ] \
     && ok "installs the slice-lander agent" || nope "missing slice-lander agent"
 
+  local skill missing_skill=0
+  for skill in add-story refine to-slices grill-me; do
+    [ -f "$repo/.claude/skills/$skill/SKILL.md" ] || missing_skill=1
+  done
+  [ "$missing_skill" -eq 0 ] && ok "installs the queue-filling skills (add-story/refine/to-slices/grill-me)" \
+    || nope "missing one of the queue-filling skills"
+
   local col missing=0
   for col in 01-backlog 02-refined 03-in-progress 04-user-verification; do
     [ -f "$repo/kanban-board/$col/.gitkeep" ] || missing=1

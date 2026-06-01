@@ -81,12 +81,19 @@ install_file() {
   log "installed ${dest#"$TARGET_DIR"/}"
 }
 
-# Install the skill + agent. These are the loop's hard preconditions.
+# Install every skill and agent the kit carries, preserving the `.claude/`
+# layout. The loop's hard preconditions are the `implement` skill + `slice-lander`
+# agent; the rest (`add-story`, `refine`, `to-slices`, `grill-me`) are the
+# human-driven queue-filling pipeline that produces refined stories — bundled for
+# convenience, not used by the loop itself. Globbing means adding a kit skill
+# needs no edit here.
 install_artifacts() {
-  install_file "$KIT_DIR/.claude/skills/implement/SKILL.md" \
-               "$TARGET_DIR/.claude/skills/implement/SKILL.md"
-  install_file "$KIT_DIR/.claude/agents/slice-lander.md" \
-               "$TARGET_DIR/.claude/agents/slice-lander.md"
+  local f rel
+  for f in "$KIT_DIR"/.claude/skills/*/SKILL.md "$KIT_DIR"/.claude/agents/*.md; do
+    [ -e "$f" ] || continue
+    rel="${f#"$KIT_DIR"/}"
+    install_file "$f" "$TARGET_DIR/$rel"
+  done
 }
 
 # Ensure the kanban columns exist, each tracked by a .gitkeep so an empty column
@@ -153,8 +160,9 @@ You are finishing a one-time scaffold that onboarded this repo to an autonomous
 implementation loop. Two files were just added with placeholder blanks marked by
 HTML comments `<!-- coder:autofill <key> -->` … `<!-- /coder:autofill -->`:
 
-  .claude/agents/slice-lander.md   (keys: architecture, verify, commit-convention)
+  .claude/agents/slice-lander.md    (keys: architecture, verify, commit-convention)
   .claude/skills/implement/SKILL.md (key: commit-convention)
+  .claude/skills/refine/SKILL.md    (key: commit-convention)
 
 Read this repo's root CLAUDE.md, package manifest, and test setup to learn the
 truth, then replace ONLY the content between each marker pair (leave the marker
