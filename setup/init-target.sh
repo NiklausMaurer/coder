@@ -163,6 +163,7 @@ HTML comments `<!-- coder:autofill <key> -->` … `<!-- /coder:autofill -->`:
   .claude/agents/slice-lander.md    (keys: architecture, verify, commit-convention)
   .claude/skills/implement/SKILL.md (key: commit-convention)
   .claude/skills/refine/SKILL.md    (key: commit-convention)
+  .claude/skills/accept-verification/SKILL.md (key: commit-convention)
 
 Read this repo's root CLAUDE.md, package manifest, and test setup to learn the
 truth, then replace ONLY the content between each marker pair (leave the marker

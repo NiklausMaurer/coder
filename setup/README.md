@@ -32,6 +32,7 @@ history, because:
 process-kit/
   .claude/skills/implement/SKILL.md    # process-generic, copied ~verbatim
   .claude/skills/{add-story,refine,to-slices,grill-me}/SKILL.md  # queue-filling pipeline
+  .claude/skills/accept-verification/SKILL.md  # human-side resume of a parked story
   .claude/agents/slice-lander.md       # template; repo-specific blanks marked coder:autofill
   kanban-board/{01-backlog,02-refined,03-in-progress,04-user-verification}/.gitkeep
   CLAUDE.snippet.md                    # section appended to the target's root CLAUDE.md
@@ -44,11 +45,12 @@ Two tiers of skill:
   carries `<!-- coder:autofill <key> -->` blocks for the parts that differ per repo —
   **architecture** invariants, the **verify** command gate, and the **commit-convention**
   (message style + trailer).
-- **Queue-filling pipeline** — `add-story` → `refine` (which orchestrates `to-slices`
-  + `grill-me`). This is the *human-driven* process that turns a problem into refined
-  stories the loop can drain; it runs on your machine, never in the loop's container.
-  Bundled so a fresh repo has the whole process, not just the loop's half. `refine`
-  also carries a **commit-convention** autofill block.
+- **Human-driven lifecycle** — `add-story` → `refine` (which orchestrates `to-slices`
+  + `grill-me`) fills the queue; `accept-verification` is the accept path for a story
+  `/implement` parked in `04-user-verification/` for a UI check. This half runs on your
+  machine, never in the loop's container. Bundled so a fresh repo has the whole process,
+  not just the loop's half. `refine` and `accept-verification` carry a **commit-convention**
+  autofill block.
 
 `init-target.sh --no-autofill` leaves the autofill blocks as `TODO(coder)` / `{{…}}`
 markers for a human; the default fills them with Claude.
