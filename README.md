@@ -16,6 +16,7 @@ claude setup-token            # prints CLAUDE_CODE_OAUTH_TOKEN
 # 2. Configure. Fill in the three required keys; everything else has defaults.
 cp .env.example .env
 $EDITOR .env                  # TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT
+# …or run the wizard instead of editing by hand: setup/setup-env.sh
 
 # 3. Build and run in the background.
 docker compose up -d --build
@@ -25,6 +26,22 @@ docker compose logs -f        # watch the loop drain the board
 That's it — the loop clones the target repo into a persistent volume and starts
 draining its `kanban-board/02-refined` column. To stop it: `docker compose down`
 (the checkout and retry-count volumes persist; add `-v` to wipe them).
+
+## Onboarding a new target repo
+
+The loop is repo-agnostic and owns no process — so a target repo must already
+carry the artifacts `/implement` needs: the `implement` skill, the `slice-lander`
+agent, and the `kanban-board/` columns. To set those up in a repo that doesn't
+have them yet:
+
+```sh
+setup/init-target.sh /path/to/target-repo   # scaffold + Claude-fill repo specifics
+```
+
+It copies the process kit from `setup/process-kit/`, fills in that repo's
+build/test/architecture specifics, and leaves you a diff to review and commit.
+See [`setup/README.md`](setup/README.md) for the full onboarding story (and why
+the loop scaffolds these once rather than injecting them at runtime).
 
 Watching the logs you'll see two channels. Operational plumbing (checkout, sleep,
 retries) is logged with a `[loop]`/`[run-once]` prefix on **stderr**; the work

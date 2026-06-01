@@ -13,7 +13,15 @@ The harness is deliberately tiny and **repo-agnostic**: it owns none of the deve
 process. The `/implement` skill, `slice-lander` agent, `CLAUDE.md`, and `kanban-board/`
 columns all live in the *target* repo (the nikos process, see `../nikos`). This loop just
 ensures a checkout and runs `claude -p "/implement"` inside it. Do not add process logic
-(refinement, slice mechanics, board conventions) here — it belongs in the target repo.
+(refinement, slice mechanics, board conventions) to the loop (`bin/`) — it belongs in the
+target repo.
+
+The one place process artifacts live here is `setup/process-kit/` — *templates* of the
+`implement` skill and `slice-lander` agent used to onboard a brand-new target repo that
+doesn't have them yet. That is a one-time scaffolder (`setup/init-target.sh` copies them
+*into* the target repo, to be committed there), explicitly **not** part of the loop: `bin/`
+never reads `setup/`. Keep it that way — the templates are a convenience for bootstrapping,
+not runtime behavior. See `setup/README.md`.
 
 ## Commands
 
@@ -21,6 +29,7 @@ ensures a checkout and runs `claude -p "/implement"` inside it. Do not add proce
 # Run the test suites (self-contained bash harnesses, no bats needed)
 bash test/run-once.test.sh
 bash test/loop.test.sh
+bash test/init-target.test.sh   # setup/init-target.sh scaffold path
 
 # Run a single test: source the file's functions, then call one test by name.
 # (Tests are bash functions named test_*; the runner block at the bottom lists them.)
