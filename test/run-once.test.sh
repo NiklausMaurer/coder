@@ -208,6 +208,72 @@ test_dirty_tree_hygiene() {
   fi
 }
 
+# --- Test: recover from a diverged checkout ----------------------------------
+#
+# A crashed run can leave the local branch with a committed-but-unpushed slice
+# while the remote moves on independently. A plain `git pull --ff-only` then
+# aborts ("Not possible to fast-forward", exit 128), wedging the loop on every
+# restart because the checkout volume outlives the container. The runner must
+# instead hard-reset onto the remote tip: converge unconditionally, discard the
+# stranded local commit, and proceed — without ever touching pushed history.
+
+test_recovers_from_divergence() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base")"
+  local stub;   stub="$(make_fake_claude_landing "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+
+  # Pre-clone so the runner takes the existing-checkout path.
+  git clone --quiet "file://$remote" "$base/checkout"
+  git -C "$base/checkout" config user.email crash@example.com
+  git -C "$base/checkout" config user.name "Crash"
+
+  # Strand a committed-but-unpushed slice on the local branch.
+  printf 'half-done slice\n' > "$base/checkout/STRANDED"
+  git -C "$base/checkout" add -A
+  git -C "$base/checkout" commit --quiet -m "crash: local commit never pushed"
+  local stranded; stranded="$(git -C "$base/checkout" rev-parse HEAD)"
+
+  # Advance the remote independently so the two histories genuinely diverge: a
+  # plain ff-only pull would now abort with exit 128.
+  git clone --quiet "file://$remote" "$base/advance"
+  git -C "$base/advance" config user.email adv@example.com
+  git -C "$base/advance" config user.name "Adv"
+  printf 'moved on\n' > "$base/advance/REMOTE_MOVED"
+  git -C "$base/advance" add -A
+  git -C "$base/advance" commit --quiet -m "advance: remote moved on"
+  git -C "$base/advance" push --quiet origin HEAD:main
+  local remote_tip; remote_tip="$(git --git-dir="$remote" rev-parse main)"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] \
+    && ok "recovers from a diverged checkout instead of aborting (exit 128)" \
+    || nope "expected exit 0 on a diverged checkout, got $rc"
+
+  # The checkout converged onto the remote tip before running: the remote's
+  # commit is present and the stranded local commit is no longer in history.
+  [ -e "$base/checkout/REMOTE_MOVED" ] \
+    && ok "converges onto the remote tip (picks up the diverged remote commit)" \
+    || nope "did not converge onto the remote commit"
+
+  if git -C "$base/checkout" merge-base --is-ancestor "$remote_tip" HEAD; then
+    ok "the discarded remote tip is an ancestor of the post-run HEAD"
+  else
+    nope "checkout did not build on the remote tip"
+  fi
+
+  ! git -C "$base/checkout" merge-base --is-ancestor "$stranded" HEAD \
+    && ok "drops the stranded local commit (no rebase/replay of unpushed work)" \
+    || nope "stranded local commit survived the reset"
+}
+
 # --- Test: surfaces failure --------------------------------------------------
 
 test_surfaces_failure() {
@@ -368,6 +434,7 @@ test_requires_repo() {
 echo "test_clone_run_land";   test_clone_run_land
 echo "test_update_existing";  test_update_existing
 echo "test_dirty_tree_hygiene"; test_dirty_tree_hygiene
+echo "test_recovers_from_divergence"; test_recovers_from_divergence
 echo "test_surfaces_failure"; test_surfaces_failure
 echo "test_per_run_timeout"; test_per_run_timeout
 echo "test_narrates_subagent_invocations"; test_narrates_subagent_invocations

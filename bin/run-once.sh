@@ -36,25 +36,26 @@ RUN_KILL_AFTER="${RUN_KILL_AFTER:-30s}"
 # --- Steps -------------------------------------------------------------------
 
 # Ensure a local checkout of TARGET_BRANCH exists and is up to date. Clones when
-# absent; on an existing checkout, discards any crash leftovers (dirty-tree
-# hygiene) and then fast-forwards.
+# absent; on an existing checkout, force-converges the local branch onto the
+# freshly-fetched remote tip and scrubs any crash leftovers.
 #
-# Before pulling, `git reset --hard` + `git clean -fd` throw away any uncommitted
-# changes and untracked files so an incomplete slice left by a crashed run can't
-# wedge the loop or block the fast-forward ("would be overwritten" / dirty-tree
-# failure). This is safe because the loop owns this isolated checkout and slice
-# work is atomic-per-commit — anything uncommitted is an incomplete slice that
-# re-runs from its `02-in-progress/` marker. The cleanup is scoped to this
-# checkout and only touches the working tree; committed history on the branch is
-# never rewritten (no rebase/amend/force).
+# We `git reset --hard origin/$TARGET_BRANCH` (not `git pull --ff-only`) because
+# the checkout is disposable and loop-owned. A crashed run can leave the local
+# branch with a committed-but-unpushed slice; the next pull then sees diverged
+# histories and aborts ("Not possible to fast-forward", exit 128), wedging the
+# loop on every restart since the checkout volume outlives the container. A hard
+# reset to the remote converges unconditionally, also discarding any uncommitted
+# changes / untracked collisions in one step. This is safe because slice work is
+# atomic-per-commit — anything not on the remote is incomplete slice work that
+# re-runs from its `03-in-progress/` marker. It moves only the *local* branch
+# pointer; pushed history is never rewritten (no rebase/amend/force).
 ensure_checkout() {
   if [ -d "$CHECKOUT_DIR/.git" ]; then
     log "updating existing checkout at $CHECKOUT_DIR"
     git -C "$CHECKOUT_DIR" fetch --quiet origin "$TARGET_BRANCH"
     git -C "$CHECKOUT_DIR" checkout --quiet "$TARGET_BRANCH"
-    git -C "$CHECKOUT_DIR" reset --hard --quiet
+    git -C "$CHECKOUT_DIR" reset --hard --quiet "origin/$TARGET_BRANCH"
     git -C "$CHECKOUT_DIR" clean -fd --quiet
-    git -C "$CHECKOUT_DIR" pull --ff-only --quiet origin "$TARGET_BRANCH"
   else
     log "cloning $TARGET_REPO (branch $TARGET_BRANCH) into $CHECKOUT_DIR"
     mkdir -p "$(dirname "$CHECKOUT_DIR")"
