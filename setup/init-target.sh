@@ -99,6 +99,16 @@ install_artifacts() {
   # repo edits it to declare any its /implement needs. Same no-clobber rule, so a
   # repo that already curated its manifest keeps it on re-run.
   install_file "$KIT_DIR/.claude/coder-plugins" "$TARGET_DIR/.claude/coder-plugins"
+  # An example Nix flake for the repo's build/test toolchain. Installed as
+  # `flake.example.nix` (inert — the loop only enters `nix develop` for a real
+  # `flake.nix`), so onboarding never breaks runs with a flake that doesn't build
+  # yet. The maintainer adapts it and renames to flake.nix to opt in. Skipped if
+  # the repo already has a flake.nix of its own.
+  if [ ! -e "$TARGET_DIR/flake.nix" ]; then
+    install_file "$KIT_DIR/flake.example.nix" "$TARGET_DIR/flake.example.nix"
+  else
+    log "flake.nix already present, skipping flake.example.nix"
+  fi
 }
 
 # Ensure the kanban columns exist, each tracked by a .gitkeep so an empty column

@@ -20,11 +20,13 @@ nope() { printf '  FAIL - %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
 # Build a bare remote with a main branch that carries a kanban board holding one
 # refined story. An optional second arg seeds a `.claude/coder-plugins` manifest
-# with that content (omit it for the common case of no declared plugins). Echoes
-# the bare remote path.
+# with that content; an optional third arg seeds a tracked `flake.nix` with that
+# content (omit either for the common case of neither). Echoes the bare remote
+# path.
 make_fixture_remote() {
   local base="$1"
   local manifest="${2:-}"
+  local flake="${3:-}"
   local remote="$base/remote.git"
   local seed="$base/seed"
 
@@ -39,6 +41,7 @@ make_fixture_remote() {
   mkdir -p "$seed/.claude"
   printf 'pretend skill\n' > "$seed/.claude/marker"
   [ -n "$manifest" ] && printf '%s\n' "$manifest" > "$seed/.claude/coder-plugins"
+  [ -n "$flake" ] && printf '%s\n' "$flake" > "$seed/flake.nix"
   git -C "$seed" add -A
   git -C "$seed" commit --quiet -m "seed: refined story + board"
   git -C "$seed" push --quiet "$remote" main
@@ -523,6 +526,112 @@ test_no_manifest_no_plugin_calls() {
     || nope "wrote a sync marker with no manifest present"
 }
 
+# --- Test: enter the target's Nix dev shell ----------------------------------
+#
+# When the target repo ships a `flake.nix`, the run is wrapped in
+# `nix develop --command` so the story's verify gate sees the target's declared
+# toolchain — the harness carries Nix, not any one target's toolchain. A repo
+# with no flake runs Claude directly on the base tooling.
+
+# Fake `nix` dropped alongside the claude stub: records its args to NIX_LOG and,
+# for `develop --command <cmd…>`, execs the wrapped command so the (stub) claude
+# still runs "inside the dev shell".
+make_fake_nix() {
+  local stub="$1"
+  cat > "$stub/nix" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$NIX_LOG"
+if [ "${1:-}" = "develop" ] && [ "${2:-}" = "--command" ]; then
+  shift 2
+  exec "$@"
+fi
+exit 0
+EOF
+  chmod +x "$stub/nix"
+}
+
+test_runs_inside_devshell_when_flake_present() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local flake='{ outputs = _: {}; }'
+  local remote; remote="$(make_fixture_remote "$base" "" "$flake")"
+  local stub;   stub="$(make_fake_claude_landing "$base")"
+  make_fake_nix "$stub"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export NIX_LOG="$base/nix.log"; : > "$NIX_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  NIX_BIN="$stub/nix" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] && ok "exits 0 with a flake present" || nope "expected exit 0, got $rc"
+
+  grep -q "develop --command" "$NIX_LOG" \
+    && ok "enters the dev shell via 'nix develop --command'" \
+    || nope "did not wrap the run in nix develop"
+
+  # The slice still landed — i.e. claude ran *through* the nix wrapper.
+  git --git-dir="$remote" ls-tree -r --name-only main | grep -qx "IMPLEMENTED" \
+    && ok "runs /implement through the dev shell (slice landed)" \
+    || nope "claude did not run inside the dev shell"
+}
+
+test_runs_directly_without_flake() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base")"   # no flake
+  local stub;   stub="$(make_fake_claude_landing "$base")"
+  make_fake_nix "$stub"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+  export NIX_LOG="$base/nix.log"; : > "$NIX_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  NIX_BIN="$stub/nix" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] && ok "exits 0 with no flake" || nope "expected exit 0, got $rc"
+  [ ! -s "$NIX_LOG" ] \
+    && ok "does not invoke nix when the target ships no flake" \
+    || nope "invoked nix despite no flake present"
+}
+
+test_falls_back_when_nix_absent() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local flake='{ outputs = _: {}; }'
+  local remote; remote="$(make_fixture_remote "$base" "" "$flake")"
+  local stub;   stub="$(make_fake_claude_landing "$base")"
+  export RUN_LOG="$base/run.log"; : > "$RUN_LOG"
+
+  # flake present, but NIX_BIN points at a nonexistent binary → fall back to a
+  # direct run rather than wedge.
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  NIX_BIN="$base/no-such-nix" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] \
+    && ok "falls back to a direct run when nix is unavailable" \
+    || nope "expected exit 0 on fallback, got $rc"
+  grep -q "flake.nix present but" "$base/stderr.log" \
+    && ok "warns that it fell back to base tooling" \
+    || nope "did not warn about the missing nix"
+  git --git-dir="$remote" ls-tree -r --name-only main | grep -qx "IMPLEMENTED" \
+    && ok "still lands the slice on the base tooling" \
+    || nope "fallback run did not land the slice"
+}
+
 # --- Test: missing config ----------------------------------------------------
 
 test_requires_repo() {
@@ -547,6 +656,9 @@ echo "test_per_run_timeout"; test_per_run_timeout
 echo "test_narrates_subagent_invocations"; test_narrates_subagent_invocations
 echo "test_syncs_declared_plugins"; test_syncs_declared_plugins
 echo "test_no_manifest_no_plugin_calls"; test_no_manifest_no_plugin_calls
+echo "test_runs_inside_devshell_when_flake_present"; test_runs_inside_devshell_when_flake_present
+echo "test_runs_directly_without_flake"; test_runs_directly_without_flake
+echo "test_falls_back_when_nix_absent"; test_falls_back_when_nix_absent
 echo "test_requires_repo";    test_requires_repo
 
 echo

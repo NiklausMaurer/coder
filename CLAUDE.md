@@ -60,7 +60,12 @@ Three scripts in `bin/`, layered — each sources the one below and re-points `l
   target's skills. It's here because plugins (unlike skills/agents) install into `~/.claude`
   rather than living in the tree, so the harness must install them; keeping *which* plugins
   in the target's manifest is what keeps the image repo-agnostic (no per-target plugin baked
-  into the Dockerfile).
+  into the Dockerfile). For the same reason `run_implement` enters the target's Nix dev shell
+  (`nix develop --command`) when the checkout has a `flake.nix`: the target's build/test
+  toolchain (the Node/runtime/system deps its verify gate needs) lives in *its* flake, so the
+  image carries only Nix, not any one target's toolchain. No flake → a direct run on the base
+  tooling; flake but no `nix` → warn and fall back. The toolchain is the third per-target
+  dependency moved out of the image (after process artifacts and plugins).
 - **`loop.sh`** — sources `run-once.sh` and wraps it in the iteration loop: pull → inspect
   board (**resume-then-drain**) → work-or-idle → adaptive sleep. Owns the retry-cap →
   quarantine state machine.

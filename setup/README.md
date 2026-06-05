@@ -35,6 +35,7 @@ process-kit/
   .claude/skills/accept-verification/SKILL.md  # human-side resume of a parked story
   .claude/agents/slice-lander.md       # template; repo-specific blanks marked coder:autofill
   .claude/coder-plugins                # which Claude plugins the loop installs (all-commented template)
+  flake.example.nix                    # starter dev-shell toolchain (inert until renamed flake.nix)
   kanban-board/{01-backlog,02-refined,03-in-progress,04-user-verification}/.gitkeep
   kanban-board/README.md               # the process guide — how the story lifecycle works
   CLAUDE.snippet.md                    # section appended to the target's root CLAUDE.md
@@ -73,6 +74,20 @@ itself. The kit ships an all-commented template (no plugins by default); a repo
 with frontend work, for instance, uncomments the `frontend-design` line. Keeping
 this here — rather than baking plugins into the coder image — is what lets one
 image drive any target.
+
+### `flake.nix` — the repo's build/test toolchain
+
+The loop runs `/implement` inside `nix develop` whenever the target has a
+`flake.nix`, so the story's verify gate (`pnpm typecheck/lint/test/build`, `go
+test`, …) sees the *target's* toolchain — the right runtime, package manager, and
+system deps. This is the toolchain counterpart to the plugin manifest: the coder
+image carries only Nix, your repo carries what it needs to build and test itself.
+Onboarding installs `flake.example.nix` (inert — the loop only enters a real
+`flake.nix`), so a not-yet-building flake can't break runs; adapt it for your
+stack, run `nix develop` + `nix flake lock`, commit `flake.lock`, then rename to
+`flake.nix` to opt in. A repo with no flake just runs on the image's base tooling.
+The flake's `shellHook` runs before Claude, so it's also where you repopulate
+dependencies the loop's per-iteration `git clean -fd` wipes (e.g. `pnpm install`).
 
 ## `init-target.sh` — onboard a target repo
 

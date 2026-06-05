@@ -25,7 +25,12 @@ services:
       # (quarantine counts survive restarts).
       - checkout:/data/checkout
       - state:/data/state
+      # Persist the Nix store so a target's dev-shell toolchain (the right Node,
+      # package manager, system deps) is built/downloaded once, not on every
+      # container recreate. Seeded from the image's base Nix store on first use.
+      - nix:/nix
 
 volumes:
   checkout:
   state:
+  nix:

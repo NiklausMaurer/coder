@@ -72,6 +72,12 @@ test_scaffolds_a_fresh_repo() {
     && ok "installs the plugin manifest template (no plugins active by default)" \
     || nope "missing or non-empty coder-plugins manifest template"
 
+  # The Nix flake ships as an inert example (never activated as flake.nix by
+  # onboarding, so a not-yet-building flake can't break the loop).
+  [ -f "$repo/flake.example.nix" ] && [ ! -e "$repo/flake.nix" ] \
+    && ok "installs the flake example without activating it" \
+    || nope "flake.example.nix missing, or onboarding activated flake.nix"
+
   grep -q 'coder:process-kit' "$repo/CLAUDE.md" \
     && ok "appends the loop section to CLAUDE.md" || nope "did not append loop section"
   grep -q 'Existing project guidance' "$repo/CLAUDE.md" \

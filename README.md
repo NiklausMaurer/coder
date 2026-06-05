@@ -132,6 +132,19 @@ frontend repo's `frontend-design` dependency lives in that repo, not in this
 image. The manifest is fingerprinted, so an unchanged one isn't re-installed each
 iteration; a repo that needs no plugins simply omits the file.
 
+If the target repo ships a `flake.nix`, the run is entered through
+`nix develop --command`, so the story's verify gate (e.g.
+`pnpm typecheck/lint/test/build`) sees the *target's* declared toolchain — the
+right language runtime, package manager, and system deps — rather than just the
+image's base tooling. The image carries Nix; the target carries its toolchain in
+the flake, which is what lets one image drive targets with wildly different build
+requirements. The flake's `shellHook` runs first, so it's also where a target
+repopulates dependencies the per-iteration `git clean -fd` wiped (e.g.
+`pnpm install`). A repo with no `flake.nix` runs on the base tooling (the simple
+case); if a flake is present but `nix` is unavailable, the loop warns and falls
+back to a direct run. See `setup/process-kit/flake.example.nix` for a starting
+point.
+
 The `claude -p` run is wrapped in a `timeout` (`RUN_TIMEOUT`, default 30m) so a
 hung session can't stall the loop forever. A run that exceeds the limit is sent
 SIGTERM — and SIGKILLed after `RUN_KILL_AFTER` if it ignores that — and exits
@@ -149,6 +162,7 @@ non-zero (124), so callers (and the loop) see it as a failed attempt.
 | `RUN_KILL_AFTER` | no       | `30s`                  | grace before SIGKILL if it ignores SIGTERM|
 | `PLUGIN_MANIFEST`| no       | `.claude/coder-plugins`| where the target declares its Claude plugins (within the checkout) |
 | `PLUGIN_SYNC_MARKER`| no    | `$HOME/.coder/plugin-sync`| fingerprint of the last-installed manifest, to skip re-syncing |
+| `NIX_BIN`        | no       | `nix`                  | Nix binary used to enter a target's `flake.nix` dev shell |
 
 ### Run
 
@@ -228,9 +242,11 @@ the Claude CLI (and `sleep`) to exercise the runner and loop end-to-end.
 ## Deployment — Docker
 
 The loop ships as a Docker image: one container per target repo. The image
-([`Dockerfile`](Dockerfile)) bundles `git` + the Claude Code CLI on a Node 22
-base and runs the loop as its entrypoint. Scaling to more repos means running
-more containers, each fully isolated.
+([`Dockerfile`](Dockerfile)) bundles `git`, the Claude Code CLI, and **Nix** on a
+Node 22 base and runs the loop as its entrypoint. The Node 22 base is only for the
+Claude CLI itself; a target's own build/test toolchain comes from its `flake.nix`
+dev shell (see *Toolchain* above), so the image stays repo-agnostic. Scaling to
+more repos means running more containers, each fully isolated.
 
 The image runs as a **non-root** user on purpose — `claude
 --dangerously-skip-permissions` refuses to run as root, and the container plus
@@ -239,18 +255,19 @@ are the real safety boundary.
 
 ### Volumes
 
-Two paths are backed by volumes so they survive container restarts:
+Three paths are backed by volumes so they survive container restarts:
 
 | Mount point      | Env var (default)             | Why it persists                                              |
 | ---------------- | ----------------------------- | ----------------------------------------------------------- |
 | `/data/checkout` | `CHECKOUT_DIR` (`=/data/checkout`) | a restart reuses the checkout instead of a full re-clone (the per-iteration hard-reset + pull keeps it clean) |
 | `/data/state`    | `STATE_FILE` (`=/data/state/retry-counts`) | a quarantined poison-pill's consecutive-failure count survives restarts |
+| `/nix`           | — (the Nix store)             | a target's dev-shell toolchain is built/downloaded once, not on every container recreate |
 
-[`docker-compose.yml`](docker-compose.yml) declares both as named volumes and
+[`docker-compose.yml`](docker-compose.yml) declares all three as named volumes and
 sets `restart: unless-stopped`, so the loop comes back after a crash or host
 reboot (a manual `stop` stays stopped). For a bare `docker run`, pass
 `--restart unless-stopped -v coder-checkout:/data/checkout -v
-coder-state:/data/state`.
+coder-state:/data/state -v coder-nix:/nix`.
 
 ### Credentials
 

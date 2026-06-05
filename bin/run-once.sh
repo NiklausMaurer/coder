@@ -19,6 +19,7 @@
 #                       Claude plugins its /implement needs   (default: .claude/coder-plugins)
 #   PLUGIN_SYNC_MARKER  fingerprint of the last-installed manifest, to skip
 #                       re-syncing an unchanged one        (default: $HOME/.coder/plugin-sync)
+#   NIX_BIN             Nix binary used to enter a target's dev shell (default: nix)
 #
 # Exit status is the `/implement` run's status, so a caller (or the future loop)
 # can tell whether the run succeeded. A run that exceeds RUN_TIMEOUT is killed and
@@ -41,6 +42,7 @@ PLUGIN_MANIFEST="${PLUGIN_MANIFEST:-.claude/coder-plugins}"
 # NOT on a state volume. The two share a lifecycle: an image rebuild wipes the
 # cache and the marker together, so the next boot re-installs from scratch.
 PLUGIN_SYNC_MARKER="${PLUGIN_SYNC_MARKER:-$HOME/.coder/plugin-sync}"
+NIX_BIN="${NIX_BIN:-nix}"
 
 # --- Steps -------------------------------------------------------------------
 
@@ -159,6 +161,18 @@ narrate_run() {
 # story). With a slug argument, runs `/implement <slug>` to resume that specific
 # story (used by the loop to recover a story stranded in `03-in-progress/`).
 #
+# Toolchain: when the target ships a `flake.nix` and `nix` is available, the run
+# is wrapped in `nix develop --command` so the story's verify gate (e.g.
+# `pnpm typecheck/lint/test/build`) sees the *target's* declared toolchain — the
+# right Node, package manager, and system deps — on PATH. The target owns the
+# flake; the harness only enters it, so the image stays repo-agnostic (it carries
+# Nix, not any one target's toolchain). A repo with no flake runs Claude directly
+# on the image's base tooling (the simple-target case); if a flake is present but
+# `nix` is missing (e.g. a host dev run) we warn and fall back to direct rather
+# than wedge. `nix develop` also runs the flake's shellHook first, which is where
+# a target repopulates deps wiped by the per-iteration `git clean -fd` (e.g.
+# `pnpm install`) — keeping that target-specific step in the target, not here.
+#
 # Output is requested as `stream-json --verbose` and piped through narrate_run so
 # the loop's logs show each top-level subagent invocation (see narrate_run). We
 # preserve the *claude/timeout* exit status — not jq's — via PIPESTATUS, because
@@ -167,9 +181,10 @@ narrate_run() {
 #
 # The run is bounded by `timeout` so a hung session can't stall the loop forever:
 # after RUN_TIMEOUT it is sent SIGTERM, and if it does not exit within
-# RUN_KILL_AFTER it is SIGKILLed. A timed-out run exits non-zero (124), which the
-# caller already treats as a failed attempt — the same signal the quarantine
-# logic later consumes.
+# RUN_KILL_AFTER it is SIGKILLed. `timeout` wraps the whole `nix develop` tree so
+# the kill reaches the dev shell *and* Claude. A timed-out run exits non-zero
+# (124), which the caller already treats as a failed attempt — the same signal the
+# quarantine logic later consumes.
 run_implement() {
   local slug="${1:-}"
   local prompt="/implement"
@@ -179,7 +194,18 @@ run_implement() {
   (
     cd "$CHECKOUT_DIR"
     set +e
+    # Decide whether to enter the target's Nix dev shell (see header).
+    local -a devshell=()
+    if [ -f flake.nix ]; then
+      if command -v "$NIX_BIN" >/dev/null 2>&1; then
+        log "entering the target's Nix dev shell (flake.nix present)"
+        devshell=( "$NIX_BIN" develop --command )
+      else
+        log "warning: flake.nix present but '$NIX_BIN' not found — running on base tooling"
+      fi
+    fi
     timeout --kill-after="$RUN_KILL_AFTER" "$RUN_TIMEOUT" \
+      "${devshell[@]}" \
       "$CLAUDE_BIN" -p "$prompt" --dangerously-skip-permissions \
         --output-format stream-json --verbose \
       | narrate_run
