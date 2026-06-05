@@ -34,6 +34,7 @@ process-kit/
   .claude/skills/{add-story,refine,to-slices,grill-me}/SKILL.md  # queue-filling pipeline
   .claude/skills/accept-verification/SKILL.md  # human-side resume of a parked story
   .claude/agents/slice-lander.md       # template; repo-specific blanks marked coder:autofill
+  .claude/coder-plugins                # which Claude plugins the loop installs (all-commented template)
   kanban-board/{01-backlog,02-refined,03-in-progress,04-user-verification}/.gitkeep
   kanban-board/README.md               # the process guide — how the story lifecycle works
   CLAUDE.snippet.md                    # section appended to the target's root CLAUDE.md
@@ -59,6 +60,19 @@ Two tiers of skill:
 
 `init-target.sh --no-autofill` leaves the autofill blocks as `TODO(coder)` / `{{…}}`
 markers for a human; the default fills them with Claude.
+
+### `coder-plugins` — the repo's plugin dependencies
+
+`.claude/coder-plugins` is where a repo declares the Claude **plugins** its
+`/implement` needs (one `<plugin>@<marketplace>  <marketplace-git-url>` per line).
+The loop installs them into its container before each run — see the loop's
+`sync_plugins`. This exists because plugins, unlike skills and agents, don't live
+in the checkout: they install into `~/.claude`, so the harness needs to be *told*
+which ones, and the only repo-agnostic place to keep that list is the target repo
+itself. The kit ships an all-commented template (no plugins by default); a repo
+with frontend work, for instance, uncomments the `frontend-design` line. Keeping
+this here — rather than baking plugins into the coder image — is what lets one
+image drive any target.
 
 ## `init-target.sh` — onboard a target repo
 

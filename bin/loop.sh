@@ -231,6 +231,10 @@ handle_resume_outcome() {
 # One loop iteration: pull, inspect (resume-then-drain), (work or idle), sleep.
 iterate() {
   ensure_checkout
+  # Install any plugins the target declares before working a story (no-op when the
+  # manifest is unchanged — see sync_plugins; the fingerprint marker makes this
+  # cheap to call every iteration).
+  sync_plugins
 
   # HEAD before the run, so log_landed_slices can name the slices it commits.
   local before

@@ -51,9 +51,16 @@ themselves. Validate changes by running the two test suites.
 Three scripts in `bin/`, layered — each sources the one below and re-points `log()`:
 
 - **`run-once.sh`** — the innermost unit. `ensure_checkout()` (clone-or-fast-forward with
-  dirty-tree hygiene) + `run_implement([slug])` (one `timeout`-bounded `claude -p` run).
-  Exits with the `/implement` run's status. Sourceable: `main` only runs when executed
-  directly (`BASH_SOURCE`/`$0` guard), so tests can source its functions.
+  dirty-tree hygiene) + `sync_plugins()` (install the Claude plugins the *target* declares
+  in `.claude/coder-plugins`, into `~/.claude`) + `run_implement([slug])` (one
+  `timeout`-bounded `claude -p` run). Exits with the `/implement` run's status. Sourceable:
+  `main` only runs when executed directly (`BASH_SOURCE`/`$0` guard), so tests can source
+  its functions. `sync_plugins` is *not* process logic — it names no plugin itself; it only
+  materializes whatever list the target carries, the same way the checkout materializes the
+  target's skills. It's here because plugins (unlike skills/agents) install into `~/.claude`
+  rather than living in the tree, so the harness must install them; keeping *which* plugins
+  in the target's manifest is what keeps the image repo-agnostic (no per-target plugin baked
+  into the Dockerfile).
 - **`loop.sh`** — sources `run-once.sh` and wraps it in the iteration loop: pull → inspect
   board (**resume-then-drain**) → work-or-idle → adaptive sleep. Owns the retry-cap →
   quarantine state machine.

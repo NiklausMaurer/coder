@@ -65,6 +65,13 @@ test_scaffolds_a_fresh_repo() {
   [ -f "$repo/kanban-board/README.md" ] && grep -q 'kanban story process' "$repo/kanban-board/README.md" \
     && ok "installs the process guide into kanban-board/" || nope "missing kanban-board/README.md guide"
 
+  # The plugin manifest ships as an all-commented template — present, but
+  # declaring no plugins by default (no uncommented entry).
+  [ -f "$repo/.claude/coder-plugins" ] \
+    && ! grep -qE '^[^#]*@' "$repo/.claude/coder-plugins" \
+    && ok "installs the plugin manifest template (no plugins active by default)" \
+    || nope "missing or non-empty coder-plugins manifest template"
+
   grep -q 'coder:process-kit' "$repo/CLAUDE.md" \
     && ok "appends the loop section to CLAUDE.md" || nope "did not append loop section"
   grep -q 'Existing project guidance' "$repo/CLAUDE.md" \

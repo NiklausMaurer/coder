@@ -19,9 +19,12 @@ ok()   { printf '  ok   - %s\n' "$1"; PASS=$((PASS + 1)); }
 nope() { printf '  FAIL - %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
 # Build a bare remote with a main branch that carries a kanban board holding one
-# refined story. Echoes the bare remote path.
+# refined story. An optional second arg seeds a `.claude/coder-plugins` manifest
+# with that content (omit it for the common case of no declared plugins). Echoes
+# the bare remote path.
 make_fixture_remote() {
   local base="$1"
+  local manifest="${2:-}"
   local remote="$base/remote.git"
   local seed="$base/seed"
 
@@ -35,6 +38,7 @@ make_fixture_remote() {
   printf 'a refined story\n' > "$seed/kanban-board/02-refined/01-some-story/story.md"
   mkdir -p "$seed/.claude"
   printf 'pretend skill\n' > "$seed/.claude/marker"
+  [ -n "$manifest" ] && printf '%s\n' "$manifest" > "$seed/.claude/coder-plugins"
   git -C "$seed" add -A
   git -C "$seed" commit --quiet -m "seed: refined story + board"
   git -C "$seed" push --quiet "$remote" main
@@ -416,6 +420,109 @@ test_narrates_subagent_invocations() {
     || nope "leaked a nested (parent_tool_use_id) event"
 }
 
+# --- Test: install plugins the target declares -------------------------------
+#
+# A target repo declares the Claude plugins its /implement needs in a
+# `.claude/coder-plugins` manifest; the runner installs them before the run
+# (marketplace add + plugin install), keeping the image itself repo-agnostic. The
+# manifest is fingerprinted so an unchanged one is not re-installed every run.
+
+# Fake `claude` that records `plugin …` subcommands to PLUGIN_LOG (and otherwise
+# lands a slice like make_fake_claude_landing). Echoes the stub dir.
+make_fake_claude_with_plugins() {
+  local base="$1"
+  local stub="$base/stub"
+  mkdir -p "$stub"
+  cat > "$stub/claude" <<'EOF'
+#!/usr/bin/env bash
+# `claude plugin …` → just record the call; everything else is the /implement run.
+if [ "${1:-}" = "plugin" ]; then
+  printf '%s\n' "$*" >> "$PLUGIN_LOG"
+  exit 0
+fi
+printf '%s\n' "$*" >> "$RUN_LOG"
+git config user.email implement@example.com
+git config user.name "Implement"
+printf 'done\n' > IMPLEMENTED
+git add -A
+git commit --quiet -m "land: slice done"
+git push --quiet origin HEAD:main
+EOF
+  chmod +x "$stub/claude"
+  printf '%s' "$stub"
+}
+
+test_syncs_declared_plugins() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local manifest='frontend-design@claude-plugins-official  https://example.test/mkt.git'
+  local remote; remote="$(make_fixture_remote "$base" "$manifest")"
+  local stub;   stub="$(make_fake_claude_with_plugins "$base")"
+  export RUN_LOG="$base/run.log";        : > "$RUN_LOG"
+  export PLUGIN_LOG="$base/plugin.log";  : > "$PLUGIN_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  PLUGIN_SYNC_MARKER="$base/plugin-sync" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] && ok "exits 0 with a plugin manifest present" || nope "expected exit 0, got $rc"
+
+  grep -q "marketplace add https://example.test/mkt.git" "$PLUGIN_LOG" \
+    && ok "adds the marketplace the target declares" \
+    || nope "did not add the declared marketplace"
+
+  grep -q "install frontend-design@claude-plugins-official" "$PLUGIN_LOG" \
+    && ok "installs the plugin the target declares" \
+    || nope "did not install the declared plugin"
+
+  # Idempotence: a second run with the unchanged manifest skips re-installing
+  # (the fingerprint marker short-circuits sync_plugins).
+  : > "$PLUGIN_LOG"
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  PLUGIN_SYNC_MARKER="$base/plugin-sync" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+
+  [ ! -s "$PLUGIN_LOG" ] \
+    && ok "skips re-syncing when the manifest is unchanged" \
+    || nope "re-ran plugin sync despite an unchanged manifest"
+}
+
+# --- Test: no manifest means no plugin work ----------------------------------
+#
+# The manifest is optional: a repo that declares no plugins (the default kit ships
+# an all-commented file, and many repos omit it) must run with zero plugin calls.
+
+test_no_manifest_no_plugin_calls() {
+  local base; base="$(mktemp -d)"
+  trap 'rm -rf "$base"' RETURN
+
+  local remote; remote="$(make_fixture_remote "$base")"   # no manifest arg
+  local stub;   stub="$(make_fake_claude_with_plugins "$base")"
+  export RUN_LOG="$base/run.log";       : > "$RUN_LOG"
+  export PLUGIN_LOG="$base/plugin.log"; : > "$PLUGIN_LOG"
+
+  TARGET_REPO="file://$remote" \
+  CHECKOUT_DIR="$base/checkout" \
+  CLAUDE_BIN="$stub/claude" \
+  PLUGIN_SYNC_MARKER="$base/plugin-sync" \
+    bash "$RUNNER" >/dev/null 2>"$base/stderr.log"
+  local rc=$?
+
+  [ "$rc" -eq 0 ] && ok "exits 0 with no plugin manifest" || nope "expected exit 0, got $rc"
+  [ ! -s "$PLUGIN_LOG" ] \
+    && ok "makes no plugin calls when the manifest is absent" \
+    || nope "ran plugin commands despite no manifest"
+  [ ! -e "$base/plugin-sync" ] \
+    && ok "writes no sync marker when there is nothing to sync" \
+    || nope "wrote a sync marker with no manifest present"
+}
+
 # --- Test: missing config ----------------------------------------------------
 
 test_requires_repo() {
@@ -438,6 +545,8 @@ echo "test_recovers_from_divergence"; test_recovers_from_divergence
 echo "test_surfaces_failure"; test_surfaces_failure
 echo "test_per_run_timeout"; test_per_run_timeout
 echo "test_narrates_subagent_invocations"; test_narrates_subagent_invocations
+echo "test_syncs_declared_plugins"; test_syncs_declared_plugins
+echo "test_no_manifest_no_plugin_calls"; test_no_manifest_no_plugin_calls
 echo "test_requires_repo";    test_requires_repo
 
 echo

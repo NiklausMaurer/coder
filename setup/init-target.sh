@@ -94,6 +94,11 @@ install_artifacts() {
     rel="${f#"$KIT_DIR"/}"
     install_file "$f" "$TARGET_DIR/$rel"
   done
+  # The plugin manifest: which Claude plugins the loop installs before running
+  # /implement. Ships as an all-commented template (no plugins by default) — the
+  # repo edits it to declare any its /implement needs. Same no-clobber rule, so a
+  # repo that already curated its manifest keeps it on re-run.
+  install_file "$KIT_DIR/.claude/coder-plugins" "$TARGET_DIR/.claude/coder-plugins"
 }
 
 # Ensure the kanban columns exist, each tracked by a .gitkeep so an empty column

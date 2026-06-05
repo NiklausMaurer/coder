@@ -15,6 +15,10 @@
 #   CLAUDE_BIN     Claude CLI binary (overridable for tests) (default: claude)
 #   RUN_TIMEOUT    max wall-clock for one /implement run    (default: 30m)
 #   RUN_KILL_AFTER grace before SIGKILL if it ignores SIGTERM (default: 30s)
+#   PLUGIN_MANIFEST     path within the checkout where the target declares the
+#                       Claude plugins its /implement needs   (default: .claude/coder-plugins)
+#   PLUGIN_SYNC_MARKER  fingerprint of the last-installed manifest, to skip
+#                       re-syncing an unchanged one        (default: $HOME/.coder/plugin-sync)
 #
 # Exit status is the `/implement` run's status, so a caller (or the future loop)
 # can tell whether the run succeeded. A run that exceeds RUN_TIMEOUT is killed and
@@ -32,6 +36,11 @@ CHECKOUT_DIR="${CHECKOUT_DIR:-$HOME/.coder/checkout}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-30m}"
 RUN_KILL_AFTER="${RUN_KILL_AFTER:-30s}"
+PLUGIN_MANIFEST="${PLUGIN_MANIFEST:-.claude/coder-plugins}"
+# Lives under $HOME on purpose — with Claude's plugin cache (~/.claude/plugins),
+# NOT on a state volume. The two share a lifecycle: an image rebuild wipes the
+# cache and the marker together, so the next boot re-installs from scratch.
+PLUGIN_SYNC_MARKER="${PLUGIN_SYNC_MARKER:-$HOME/.coder/plugin-sync}"
 
 # --- Steps -------------------------------------------------------------------
 
@@ -60,6 +69,58 @@ ensure_checkout() {
     log "cloning $TARGET_REPO (branch $TARGET_BRANCH) into $CHECKOUT_DIR"
     mkdir -p "$(dirname "$CHECKOUT_DIR")"
     git clone --quiet --branch "$TARGET_BRANCH" "$TARGET_REPO" "$CHECKOUT_DIR"
+  fi
+}
+
+# Install the Claude plugins the *target repo* declares, so the upcoming
+# `/implement` run can use them. This is the one bit of target-specific tooling
+# the harness can't get for free by being inside the checkout: skills and agents
+# live in the tree and Claude loads them automatically, but plugins install into
+# ~/.claude via an explicit marketplace-add + install. We keep the loop
+# repo-agnostic by reading *what* to install from a manifest the target carries —
+# the harness never names a plugin itself (so a frontend repo's frontend-design
+# dependency lives in that repo, not baked into this generic image).
+#
+# Manifest (`$PLUGIN_MANIFEST` within the checkout) is line-based; each
+# non-comment line is:
+#     <plugin>@<marketplace>  <marketplace-git-url>
+# The left token is exactly what `claude plugin install` takes; the right is what
+# `claude plugin marketplace add` takes. Blank lines and `#` comments are ignored.
+# A repo with no plugin needs simply omits the file (this is then a no-op).
+#
+# Cheap and idempotent: we fingerprint the manifest and skip when it is unchanged
+# since the last successful sync into this plugin cache. A re-add of an existing
+# marketplace is tolerated (`|| true`); an install that fails leaves the marker
+# unwritten so it retries next iteration rather than being skipped forever.
+sync_plugins() {
+  local manifest="$CHECKOUT_DIR/$PLUGIN_MANIFEST"
+  [ -f "$manifest" ] || return 0
+
+  local fp
+  fp="$(sha1sum "$manifest" | cut -d' ' -f1)"
+  if [ -f "$PLUGIN_SYNC_MARKER" ] && [ "$(cat "$PLUGIN_SYNC_MARKER")" = "$fp" ]; then
+    return 0
+  fi
+
+  log "syncing plugins declared in $PLUGIN_MANIFEST"
+  local all_ok=1 plugin url
+  while read -r plugin url _; do
+    case "$plugin" in ''|\#*) continue ;; esac
+    if [ -n "$url" ]; then
+      "$CLAUDE_BIN" plugin marketplace add "$url" >/dev/null 2>&1 || true
+    fi
+    if "$CLAUDE_BIN" plugin install "$plugin" >/dev/null 2>&1; then
+      log "  installed $plugin"
+    else
+      log "  warning: failed to install $plugin (will retry next iteration)"
+      all_ok=0
+    fi
+  done < "$manifest"
+
+  # Only fingerprint a fully-successful sync, so a transient failure retries.
+  if [ "$all_ok" = 1 ]; then
+    mkdir -p "$(dirname "$PLUGIN_SYNC_MARKER")"
+    printf '%s\n' "$fp" > "$PLUGIN_SYNC_MARKER"
   fi
 }
 
@@ -138,6 +199,7 @@ main() {
   fi
 
   ensure_checkout
+  sync_plugins
 
   local status=0
   run_implement || status=$?

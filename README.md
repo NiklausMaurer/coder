@@ -121,6 +121,17 @@ repo carries its own `/implement` skill, `slice-lander` agent, `CLAUDE.md`, and
 `kanban-board/` columns — the runner provides none of them and modifies nothing;
 `/implement` commits, pushes, and parks per its own rules.
 
+After the checkout, the runner installs whatever Claude plugins the target repo
+declares in `.claude/coder-plugins` (one `<plugin>@<marketplace>  <git-url>` per
+line) — a `claude plugin marketplace add` + `claude plugin install` per entry,
+into `~/.claude`. This is the one piece of target-specific tooling the harness
+can't pick up just by being inside the checkout (skills and agents live in the
+tree and load automatically; plugins install into `~/.claude`). Keeping it in the
+target's manifest is what lets one repo-agnostic image drive any target — a
+frontend repo's `frontend-design` dependency lives in that repo, not in this
+image. The manifest is fingerprinted, so an unchanged one isn't re-installed each
+iteration; a repo that needs no plugins simply omits the file.
+
 The `claude -p` run is wrapped in a `timeout` (`RUN_TIMEOUT`, default 30m) so a
 hung session can't stall the loop forever. A run that exceeds the limit is sent
 SIGTERM — and SIGKILLed after `RUN_KILL_AFTER` if it ignores that — and exits
@@ -136,6 +147,8 @@ non-zero (124), so callers (and the loop) see it as a failed attempt.
 | `CLAUDE_BIN`     | no       | `claude`               | Claude CLI binary (override in tests)     |
 | `RUN_TIMEOUT`    | no       | `30m`                  | max wall-clock for one `/implement` run   |
 | `RUN_KILL_AFTER` | no       | `30s`                  | grace before SIGKILL if it ignores SIGTERM|
+| `PLUGIN_MANIFEST`| no       | `.claude/coder-plugins`| where the target declares its Claude plugins (within the checkout) |
+| `PLUGIN_SYNC_MARKER`| no    | `$HOME/.coder/plugin-sync`| fingerprint of the last-installed manifest, to skip re-syncing |
 
 ### Run
 

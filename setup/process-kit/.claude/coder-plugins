@@ -1,0 +1,16 @@
+# coder plugin manifest — Claude plugins the autonomous loop installs before it
+# runs this repo's `/implement`. The loop installs whatever is listed here into
+# its container's ~/.claude (so the image itself stays repo-agnostic; your repo's
+# plugin needs live here, with the rest of your process artifacts).
+#
+# One plugin per line:
+#     <plugin>@<marketplace>  <marketplace-git-url>
+#   - the left token is passed to `claude plugin install`
+#   - the right token is passed to `claude plugin marketplace add`
+# Blank lines and lines starting with `#` are ignored. Delete this file entirely
+# if your `/implement` needs no plugins.
+#
+# Example — uncomment / edit for your repo (this one adds Anthropic's
+# frontend-design plugin from the official public marketplace):
+#
+# frontend-design@claude-plugins-official  https://github.com/anthropics/claude-plugins-official.git
