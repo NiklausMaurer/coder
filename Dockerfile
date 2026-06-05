@@ -42,5 +42,14 @@ ENV HOME=/home/coder \
 USER coder
 WORKDIR /home/coder
 
+# Pre-install the frontend-design plugin so `/implement` runs can use it. Done as
+# the coder user (after ENV HOME) so the marketplace clone + plugin cache and the
+# enabledPlugins entry land under /home/coder/.claude, baked into the image — it's
+# not on a volume, so it survives without a per-container install. Use the explicit
+# HTTPS marketplace URL (not the `owner/repo` shorthand, which the CLI clones over
+# SSH) because the build has no SSH key; the repo is public, so no auth is needed.
+RUN claude plugin marketplace add https://github.com/anthropics/claude-plugins-official.git \
+    && claude plugin install frontend-design@claude-plugins-official
+
 # The entrypoint wires credentials from the environment, then execs the loop.
 ENTRYPOINT ["/app/bin/docker-entrypoint.sh"]
