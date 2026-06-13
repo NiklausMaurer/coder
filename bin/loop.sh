@@ -63,11 +63,11 @@ source "$SCRIPT_DIR/run-once.sh"
 # Re-point logging at the loop while reusing run-once's helpers.
 log() { printf '[loop] %s\n' "$*" >&2; }
 
-# Human-facing progress narration — which story the loop is working on and which
-# slices it lands — emitted to *stdout*, deliberately separate from log()'s
+# Human-facing progress narration — which story the loop is working on and where
+# that story ends up — emitted to *stdout*, deliberately separate from log()'s
 # operational/plumbing output on stderr. This lets you watch just the work signal
 # (e.g. `docker compose logs` or a `tee`) without the checkout/sleep/retry noise.
-# Both channels are board/git-derived; neither parses Claude's stdout (invariant
+# Both channels are board-derived; neither parses Claude's stdout (invariant
 # #1: the board, never Claude's stdout, is the signal).
 progress() { printf '[coder] %s\n' "$*"; }
 
@@ -114,25 +114,27 @@ lowest_story() {
 in_progress_story() { lowest_story "$KANBAN_IN_PROGRESS"; }
 refined_story()     { lowest_story "$KANBAN_REFINED"; }
 
-# Echo the checkout's current HEAD sha (empty before the first checkout exists).
-head_sha() { git -C "$CHECKOUT_DIR" rev-parse HEAD 2>/dev/null || true; }
-
-# Narrate the slices a run landed. Slice work is atomic-per-commit and the run
-# commits + pushes into this checkout, so every commit added since `before` (the
-# HEAD captured before the run) is one slice that landed — read straight from git,
-# not Claude's stdout. A crashed or cleanly-parked run that committed nothing
-# leaves HEAD unmoved and says so.
-log_landed_slices() {
-  local before="$1"
-  local after; after="$(head_sha)"
-  if [ -z "$before" ] || [ "$before" = "$after" ]; then
-    progress "no slices landed this run"
-    return
+# Narrate, at the story level, where the run just finished left its story — read
+# from the board (invariant #1), never from a commit range. The `/implement`
+# subagent already logs each slice as it lands, so the loop doesn't re-list them;
+# it only reports the destination. Three board states say it all: the story folder
+# is gone (every slice landed and `/implement` deleted the story), it sits in
+# 04-user-verification (parked for a human — some or all slices may have landed,
+# see the subagent log), or it is still in 03-in-progress (the run crashed or
+# timed out mid-story and the next iteration resumes it). Reading the board rather
+# than a `before..after` commit range is also what keeps foreign commits — refine
+# or backlog work another process pushes while this run integrates to land on top
+# of it — from being misreported as slices this run landed.
+narrate_story_outcome() {
+  local slug="$1"
+  [ -n "$slug" ] || return 0
+  if [ -d "$CHECKOUT_DIR/$KANBAN_VERIFICATION/$slug" ]; then
+    progress "parked story for user verification: $slug"
+  elif [ -d "$CHECKOUT_DIR/$KANBAN_IN_PROGRESS/$slug" ]; then
+    progress "story incomplete, will resume next iteration: $slug"
+  else
+    progress "landed story (all slices): $slug"
   fi
-  local line
-  while IFS= read -r line; do
-    progress "landed slice: $line"
-  done < <(git -C "$CHECKOUT_DIR" log --format='%h %s' "$before..$after")
 }
 
 do_sleep() {
@@ -236,10 +238,6 @@ iterate() {
   # cheap to call every iteration).
   sync_plugins
 
-  # HEAD before the run, so log_landed_slices can name the slices it commits.
-  local before
-  before="$(head_sha)"
-
   local resume
   resume="$(in_progress_story)"
   if [ -n "$resume" ]; then
@@ -248,15 +246,21 @@ iterate() {
     if ! run_implement "$resume"; then
       log "implement run failed; continuing to next iteration"
     fi
-    log_landed_slices "$before"
+    narrate_story_outcome "$resume"
     handle_resume_outcome "$resume"
     do_sleep "$WORK_SLEEP" work
   elif [ "$(count_refined)" -gt 0 ]; then
-    progress "working on story: $(refined_story) (draining refined column)"
+    # Capture the story `/implement` will claim (the lowest refined) before the
+    # run so we can report its board outcome after. On the drain path Claude, not
+    # the loop, picks the story, but it always claims the lowest refined one — the
+    # same one `refined_story` names here.
+    local drained
+    drained="$(refined_story)"
+    progress "working on story: $drained (draining refined column)"
     if ! run_implement; then
       log "implement run failed; continuing to next iteration"
     fi
-    log_landed_slices "$before"
+    narrate_story_outcome "$drained"
     do_sleep "$WORK_SLEEP" work
   else
     log "no in-progress or refined stories; idle"

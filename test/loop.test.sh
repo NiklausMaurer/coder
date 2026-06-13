@@ -269,14 +269,15 @@ EOF
     || nope "expected 1 refined story left, got $left"
 }
 
-# --- Test: stdout narrates the story and the slices it lands ------------------
+# --- Test: stdout narrates the story and its board outcome --------------------
 #
 # The loop announces the story it is working on (by name, on both the resume and
-# the no-slug drain path) and each slice it lands, on *stdout* — separate from the
-# operational log on stderr. Slice lines are git-derived (one per commit the run
-# pushed), not parsed from Claude's output.
+# the no-slug drain path) and, once the run finishes, where that story ended up,
+# on *stdout* — separate from the operational log on stderr. The outcome is read
+# from the board (the story folder is gone = fully landed), not from a commit
+# range, so foreign commits the run integrates can never be misreported as slices.
 
-test_progress_narrates_story_and_slices() {
+test_progress_narrates_story_outcome() {
   local base; base="$(mktemp -d)"
   trap 'rm -rf "$base"' RETURN
 
@@ -298,10 +299,17 @@ test_progress_narrates_story_and_slices() {
     && ok "stdout announces the story being drained, by name" \
     || nope "stdout did not announce the drained story"
 
-  # The landed slice is reported from the commit the run pushed (subject + sha).
-  grep -Eq '^\[coder\] landed slice: [0-9a-f]+ land: 01-story-1$' "$base/stdout.log" \
-    && ok "stdout reports the landed slice from the new commit" \
-    || nope "stdout did not report the landed slice"
+  # The drain stub removes the story folder (every slice landed), so the board
+  # shows it gone and the loop reports the story landed at the story level.
+  grep -q '^\[coder\] landed story (all slices): 01-story-1$' "$base/stdout.log" \
+    && ok "stdout reports the story landed once its folder is gone from the board" \
+    || nope "stdout did not report the landed story"
+
+  # No per-commit slice listing leaks back in — the loop narrates stories, not a
+  # commit range (which is what swept foreign refine/backlog commits in before).
+  grep -q '^\[coder\] landed slice:' "$base/stdout.log" \
+    && nope "stdout still lists individual commits as landed slices" \
+    || ok "no per-commit 'landed slice' lines — story-level narration only"
 
   # Narration goes to stdout, not the stderr plumbing channel.
   grep -q '^\[coder\]' "$base/stdout.log" \
@@ -310,13 +318,14 @@ test_progress_narrates_story_and_slices() {
     || nope "progress/log channels are not cleanly separated"
 }
 
-# --- Test: a run that lands nothing says so -----------------------------------
+# --- Test: a run that lands nothing reports the story incomplete --------------
 #
-# An idle iteration (empty board) does no run; a work iteration whose run commits
-# nothing must report "no slices landed" rather than inventing slice lines. Here
-# the poison stub crashes without touching the board, so HEAD never moves.
+# A work iteration whose run commits nothing must say so at the story level. Here
+# the poison stub crashes without touching the board, so the resumed story stays
+# in 03-in-progress and the loop reports it incomplete (to be resumed), rather
+# than inventing slice lines from an unmoved HEAD.
 
-test_progress_no_slices_when_nothing_lands() {
+test_progress_incomplete_when_nothing_lands() {
   local base; base="$(mktemp -d)"
   trap 'rm -rf "$base"' RETURN
 
@@ -334,9 +343,9 @@ test_progress_no_slices_when_nothing_lands() {
   PATH="$stub:$PATH" \
     bash "$LOOP" >"$base/stdout.log" 2>/dev/null
 
-  grep -q '^\[coder\] no slices landed this run$' "$base/stdout.log" \
-    && ok "a run that commits nothing reports no slices landed" \
-    || nope "expected a 'no slices landed' line on stdout"
+  grep -q '^\[coder\] story incomplete, will resume next iteration: 01-wip-1$' "$base/stdout.log" \
+    && ok "a run that commits nothing reports the story incomplete" \
+    || nope "expected an 'incomplete, will resume' line on stdout"
 }
 
 # --- Test: missing config ----------------------------------------------------
@@ -593,8 +602,8 @@ echo "test_resume_lowest_in_progress"; test_resume_lowest_in_progress
 echo "test_quarantine_after_retry_cap"; test_quarantine_after_retry_cap
 echo "test_counter_survives_restart";  test_counter_survives_restart
 echo "test_timeout_continues_loop";   test_timeout_continues_loop
-echo "test_progress_narrates_story_and_slices"; test_progress_narrates_story_and_slices
-echo "test_progress_no_slices_when_nothing_lands"; test_progress_no_slices_when_nothing_lands
+echo "test_progress_narrates_story_outcome"; test_progress_narrates_story_outcome
+echo "test_progress_incomplete_when_nothing_lands"; test_progress_incomplete_when_nothing_lands
 echo "test_requires_repo";            test_requires_repo
 
 echo

@@ -75,15 +75,18 @@ narration you usually care about is on **stdout** with a `[coder]` prefix:
 
 ```text
 [coder] working on story: 03-export-csv (draining refined column)
-[coder] landed slice: a1b2c3d add csv column mapping
-[coder] landed slice: e4f5a6b stream rows to the response
+[coder] landed story (all slices): 03-export-csv
 ```
 
 Each story is named before its run (on both the resume and the no-slug drain
-path), and each landed slice is read straight from the commits the run pushed —
-git, not Claude's stdout, so the line is true whether the run lands one slice or
-several. A run that crashes or parks without committing reports `no slices landed
-this run`. To follow just this channel: `docker compose logs -f | grep '\[coder\]'`.
+path), and once the run finishes the loop reports where that story ended up,
+read straight from the board — not a commit range: the folder is gone (every
+slice landed), or it is `parked story for user verification` (a human is needed),
+or it is `story incomplete, will resume next iteration` (the run crashed or timed
+out mid-story). Per-slice detail lives in the `[implement]` channel below; the
+loop stays at the story level so refine/backlog commits another process pushes
+while a run integrates are never misreported as landed slices. To follow just
+this channel: `docker compose logs -f | grep '\[coder\]'`.
 
 For a peek *inside* a run, the runner asks Claude for `--output-format stream-json`
 and narrates the top-level subagent invocations it makes (the `/implement` skill

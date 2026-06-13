@@ -36,7 +36,7 @@ For each remaining slice:
 
 - Read its `Type`:
   - **HITL** → **park and notify** (step 5) without attempting it. The slice file stays in `01-todo/`.
-  - **AFK** → spawn a `slice-lander` subagent (Agent tool, `subagent_type: slice-lander`) pointed at the slice file's full path. Wait for it to finish.
+  - **AFK** → spawn a `slice-lander` subagent (Agent tool, `subagent_type: slice-lander`) pointed at the slice file's full path. Set the Agent `description` to `Land slice <NN> of <story>: <slice title>` — the slice's `NN-` prefix, the story slug, and the slice's own title (its file heading, falling back to its `<slug>`); the coder loop surfaces this `description` verbatim in its logs, so naming the slice is what makes each landed slice legible there. Wait for it to finish.
 - On the lander's result:
   - **Landed** (it committed and moved the file to `03-done/`): `git push`, then continue to the next slice.
   - **Escalated** a slice-level disagreement (slice is wrong, precondition false, invariant conflict): the lander has already exhausted its own bug-fixing — do **not** retry. The escalated slice file is sitting in the story's `02-in-progress/`; `git mv` it back to `01-todo/` so the story stays resumable, then **park and notify** (step 5), including the lander's escalation message.
