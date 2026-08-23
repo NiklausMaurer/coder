@@ -106,18 +106,40 @@ It never clobbers existing kit files without `--force`, only *adds* missing boar
 columns, and appends the CLAUDE.md section at most once. After it runs: review the
 diff (especially the slice-lander blanks), then commit and push to the target repo.
 
-## `setup-env.sh` — build coder's `.env`
+## `setup-env.sh` — scaffold a target directory
 
 ```sh
-setup/setup-env.sh
+setup/setup-env.sh ~/coder/nikos
 ```
 
-Walks through the three required keys (`TARGET_REPO`, `CLAUDE_CODE_OAUTH_TOKEN`,
-`GIT_PAT`) and the common optional ones, offering to run `claude setup-token` for
-you. Secrets are read without echo; the file is written owner-only and an existing
-`.env` is backed up to `.env.bak`. See `.env.example` for the full config matrix.
+A *target* is the loop's deployment unit: a directory holding a `.env` and a
+`docker-compose.yml`, living **outside** the coder repo (which only builds the
+image). This wizard writes both — walking through the three required keys
+(`TARGET_REPO`, `CLAUDE_CODE_OAUTH_TOKEN`, `GIT_PAT`) and the common optional ones,
+and offering to run `claude setup-token` for you. Secrets are read without echo; the
+files are written owner-only and an existing `.env` is backed up to `.env.bak`. See
+`target-template/.env.example` for the full config matrix.
 
-Then: `docker compose up -d --build`.
+Both files are written together on purpose: a `.env` with no compose file — or a
+compose file left over from another target — is the failure mode hand-copying
+produces.
+
+The **directory name becomes the Compose project name**, which namespaces the
+container and all three volumes (`nikos-coder-1`, `nikos_checkout`, …), so the
+wizard rejects a name Compose would silently mangle.
+
+Then, from the coder repo once: `docker build -t coder .`; and from the target
+directory: `docker compose up -d`.
+
+## `target-template/` — what a target directory is made of
+
+The two files `setup-env.sh` materializes. `docker-compose.yml` is copied verbatim —
+it is target-independent, because everything that varies (project, container and
+volume names) is derived by Compose from the directory name — and it carries no
+`build:` (the image is built once in the coder repo) and no `container_name:` (an
+explicit name would ignore the project name and collide across targets).
+
+Like `process-kit/`, this is scaffolding: `bin/` never reads it.
 
 ## Credits & licensing
 

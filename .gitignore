@@ -4,6 +4,7 @@
 # OS
 .DS_Store
 
-# Local config + secrets (TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT).
-# .env.example is committed; the real .env is not.
+# Defensive: real config + secrets (TARGET_REPO, CLAUDE_CODE_OAUTH_TOKEN, GIT_PAT)
+# live in a target directory outside this repo, never here. The committed template
+# is setup/target-template/.env.example.
 .env

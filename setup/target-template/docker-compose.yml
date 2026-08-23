@@ -1,0 +1,50 @@
+# One target repo = one directory = one Compose project = one container.
+#
+# This file is a *template*: `setup/setup-env.sh <dir>` copies it, alongside a
+# `.env`, into a target directory that lives OUTSIDE the coder repo (e.g.
+# `~/coder/nikos/`). You then drive that target with plain Compose from inside
+# its own directory:
+#
+#   cd ~/coder/nikos
+#   docker compose up -d
+#   docker compose logs -f
+#
+# There is deliberately no `build:` and no `container_name:`.
+#   - No build: the image is built once in the coder repo (`docker build -t coder .`)
+#     and every target references it. That seam is what lets one target pin a
+#     different tag (`image: coder:v2`) to try a loop change on one repo first.
+#   - No container_name: an explicit name ignores the Compose project name and
+#     would collide across targets. Left out, Compose derives everything from the
+#     *directory name* — project `nikos`, container `nikos-coder-1`, volumes
+#     `nikos_checkout`/`nikos_state`/`nikos_nix`. Renaming the directory therefore
+#     renames the project and orphans its volumes.
+services:
+  coder:
+    image: coder
+    # Keep the loop running across crashes and host reboots; a manual `stop`
+    # stays stopped.
+    restart: unless-stopped
+    # required: true — unlike the coder repo's old root compose file, a target
+    # directory is meaningless without its .env (no TARGET_REPO, no credentials),
+    # so failing loudly here beats a container that starts and immediately dies.
+    env_file:
+      - path: .env
+        required: true
+    volumes:
+      # Persist the checkout (no re-clone on restart) and the retry-count state
+      # (quarantine counts survive restarts).
+      - checkout:/data/checkout
+      - state:/data/state
+      # Persist the Nix store so a target's dev-shell toolchain (the right Node,
+      # package manager, system deps) is built/downloaded once, not on every
+      # container recreate. Seeded from the image's base Nix store on first use.
+      - nix:/nix
+
+# Per-target, not shared across targets. A shared Nix store would dedupe the
+# closures, but it makes one store the single piece of mutable state behind every
+# target — a corrupted or GC-contended store would take all of them down instead
+# of one. N closures on disk is the price of that isolation.
+volumes:
+  checkout:
+  state:
+  nix:

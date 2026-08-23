@@ -4,8 +4,12 @@
 test
 slices
 *.md
-docker-compose.yml
 .dockerignore
 .gitignore
+# setup/ is one-time scaffolding (process kit + target-directory template) run on
+# the host, never inside the image — and target-template/.env.example has no place
+# in a build context.
+setup
+# Defensive: a target's config lives in its own directory outside this repo, but
+# never let a stray local .env into the build context.
 .env
-.env.example

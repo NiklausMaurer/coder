@@ -9,12 +9,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 own `/implement` process, parking anything that needs a human, then polling for more.
 Ships as a Docker image, one container per target repo.
 
+**This repo builds that image and runs nothing.** A *target* — one repo to drain — is a
+directory that lives **outside** this repo (e.g. `~/coder/nikos/`), holding a `.env` and
+a `docker-compose.yml`; you drive it with plain Compose from inside it. There is
+deliberately no root `docker-compose.yml`. Two consequences worth keeping intact: the
+target's **directory name is the Compose project name**, so container and all three
+volumes namespace themselves off it (hence no `container_name:` in the template, and the
+name validation in `setup-env.sh`); and target config is never committed anywhere, so it
+does not sit untracked in a working tree the loop treats as disposable.
+
 The harness is deliberately tiny and **repo-agnostic**: it owns none of the development
 process. The `/implement` skill, `slice-lander` agent, `CLAUDE.md`, and `kanban-board/`
 columns all live in the *target* repo (the nikos process, see `../nikos`). This loop just
 ensures a checkout and runs `claude -p "/implement"` inside it. Do not add process logic
 (refinement, slice mechanics, board conventions) to the loop (`bin/`) — it belongs in the
 target repo.
+
+`setup/` holds two scaffolders, both one-time host-side tools that `bin/` never reads:
+`init-target.sh` (process kit → into the target repo) and `setup-env.sh` (a target
+directory → `.env` + `docker-compose.yml`, copied from `setup/target-template/`).
 
 The one place process artifacts live here is `setup/process-kit/` — *templates* of the
 `implement` skill and `slice-lander` agent used to onboard a brand-new target repo that
@@ -38,9 +51,12 @@ bash test/init-target.test.sh   # setup/init-target.sh scaffold path
 TARGET_REPO=https://github.com/you/repo.git bin/run-once.sh
 TARGET_REPO=https://github.com/you/repo.git bin/loop.sh
 
-# Build & run the container (config via .env — copy from .env.example)
-docker compose up -d --build
-docker compose logs -f
+# Build the image (this repo runs nothing; targets are directories elsewhere)
+docker build -t coder .
+
+# Scaffold and run a target
+setup/setup-env.sh ~/coder/nikos
+cd ~/coder/nikos && docker compose up -d && docker compose logs -f
 ```
 
 There is no build step, linter, or package manager — the deliverable is the Bash scripts

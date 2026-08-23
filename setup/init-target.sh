@@ -228,7 +228,8 @@ main() {
   log "done. Next steps:"
   log "  1. Review the diff in $TARGET_DIR (esp. the slice-lander blanks)."
   log "  2. Commit & push the scaffold to the target repo."
-  log "  3. Point the loop at it: run coder/setup/setup-env.sh, then 'docker compose up -d --build'."
+  log "  3. Point the loop at it: coder/setup/setup-env.sh ~/coder/<name>,"
+  log "     then from that directory: 'docker compose up -d'."
 }
 
 # Only run main when executed directly, so tests can source the functions.
