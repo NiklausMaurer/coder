@@ -83,14 +83,17 @@ install_file() {
 
 # Install every skill and agent the kit carries, preserving the `.claude/`
 # layout. The loop's hard preconditions are the `implement` skill + `slice-lander`
-# agent; the rest (`add-story`, `refine`, `to-slices`, `grill-me`) are the
+# agent; the rest (`add-story`, `refine`, `to-slices`, `grill-with-docs`) are the
 # human-driven queue-filling pipeline that produces refined stories — bundled for
 # convenience, not used by the loop itself. Globbing means adding a kit skill
-# needs no edit here.
+# needs no edit here. A skill is a *directory*, not just its SKILL.md: we copy
+# every file in it, because a skill may push reference material into sibling
+# files that SKILL.md links to (grill-with-docs does — CONTEXT-FORMAT.md,
+# ADR-FORMAT.md), and those are as much part of the skill as its entrypoint.
 install_artifacts() {
   local f rel
-  for f in "$KIT_DIR"/.claude/skills/*/SKILL.md "$KIT_DIR"/.claude/agents/*.md; do
-    [ -e "$f" ] || continue
+  for f in "$KIT_DIR"/.claude/skills/*/* "$KIT_DIR"/.claude/agents/*.md; do
+    [ -f "$f" ] || continue
     rel="${f#"$KIT_DIR"/}"
     install_file "$f" "$TARGET_DIR/$rel"
   done

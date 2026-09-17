@@ -16,11 +16,9 @@ here, this page is the whole mental model.
   demoable on their own. Many thin slices beat a few thick ones. Slices live as files
   inside the story folder, moving through sub-directories `01-todo/ → 02-in-progress/ →
   03-done/` as they're built.
-- Each slice is typed **AFK** or **HITL**:
-  - **AFK** ("away from keyboard") — an agent can build and land it unattended.
-  - **HITL** ("human in the loop") — needs a person (a design call, a manual config, a
-    UI eyeball). The implementer pauses rather than guessing. Prefer AFK; reserve HITL
-    for what truly needs you.
+- Every slice is built **unattended**. That's what refining is for: the decision-type
+  questions get answered while the story is refined, so nothing needs a human mid-build.
+  The human check comes once, on the finished story.
 
 ## The columns (left → right)
 
@@ -29,9 +27,9 @@ here, this page is the whole mental model.
 | `01-backlog/` | Captured problems, not yet refined. Just `problem.md`. | `/refine` (you) |
 | `02-refined/` | Sliced and ready to build. **This is the loop's inbox.** | `/implement` (loop) |
 | `03-in-progress/` | A story being landed slice by slice. | `/implement` (loop) |
-| `04-user-verification/` | Parked — needs a human (a HITL slice, an escalation, or a UI check). | `/accept-verification` (you) |
+| `04-user-verification/` | Parked — awaiting your verification, or an escalation. | `/accept-verification` (you) |
 
-A finished story is **deleted** from the board (its work lives in git history), so the
+A verified story is **deleted** from the board (its work lives in git history), so the
 board only ever shows outstanding work.
 
 ## The skills, and who runs them
@@ -42,19 +40,20 @@ machine, interactively), and an **autonomous** half that drains it (the loop).
 **You, to fill the queue:**
 
 1. `/add-story <slug> <problem>` — create a backlog story (`01-backlog/NN-<slug>/problem.md`).
-2. `/refine <slug>` — interactive. It runs `/grill-me` to interrogate the problem until
-   the design is settled, then `/to-slices` to cut it into AFK/HITL slices, then promotes
-   the story to `02-refined/`. **Resolve all the decision-type questions here** — that's
-   what lets the build run unattended afterwards.
+2. `/refine <slug>` — interactive. It runs `/grill-with-docs` to interrogate the problem
+   until the design is settled (writing settled vocabulary to `CONTEXT.md` and any
+   qualifying decision to `docs/adr/` as it goes), then `/to-slices` to cut it into
+   slices, then promotes the story to `02-refined/`. **Resolve all the decision-type
+   questions here** — that's what lets the build run unattended afterwards.
 
 **The loop, to drain the queue** (you can also run these by hand):
 
 3. `/implement [<slug>]` — claims the lowest story in `02-refined/` (or the named one),
    moves it to `03-in-progress/`, and lands its slices **one at a time** by spawning a
-   `slice-lander` subagent per slice, pushing after each. If it hits a HITL slice, an
-   escalation, or a UI slice that needs eyeballing, it **parks the whole story** in
-   `04-user-verification/` and moves on. When every slice is done (and no UI check is
-   pending) it deletes the story.
+   `slice-lander` subagent per slice, pushing after each. It **parks the whole story** in
+   `04-user-verification/` and moves on — either because every slice landed and the story
+   now awaits your verification, or because a lander escalated. It never deletes a
+   story.
 4. `slice-lander` (a subagent, not a slash command) — lands **exactly one** slice
    end-to-end: implements it, runs this repo's verification gate (typecheck/lint/test/
    build), commits, and moves the slice file to `03-done/`. It never pushes and never
@@ -62,18 +61,21 @@ machine, interactively), and an **autonomous** half that drains it (the loop).
 
 **You, to unblock:**
 
-5. `/accept-verification <slug>` — the accept path for a parked story. Running it **is**
-   your confirmation that the UI checked out: it deletes the story if nothing remains, or
-   moves it back to `03-in-progress/` so the loop resumes the rest. (Verification
+5. `/accept-verification <slug>` — the accept path for a parked story, and the only thing
+   that removes a story from the board. Running it **is** your confirmation that the story
+   checked out: it deletes the story if nothing remains, or moves it back to
+   `03-in-progress/` so the loop resumes the rest (an escalation park). (Verification
    *failed*? Don't run this — capture a fix slice or new story and let `/implement`
    rework it.)
 
 ```
-/add-story ──▶ 01-backlog ──/refine──▶ 02-refined ──/implement──▶ 03-in-progress ──▶ (done, deleted)
-                                                          │                ▲
-                                              parks blocker│                │/accept-verification
-                                                          ▼                │
-                                                 04-user-verification ──────┘
+/add-story ──▶ 01-backlog ──/refine──▶ 02-refined ──/implement──▶ 03-in-progress
+                                                                         │
+                                                        every story parks │
+                                                                         ▼
+                        (deleted) ◀──/accept-verification──  04-user-verification
+                                                                         │
+                                        escalation: back to 03-in-progress┘
 ```
 
 ## Two invariants worth knowing

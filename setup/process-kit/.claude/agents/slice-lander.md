@@ -24,8 +24,9 @@ Resolve the exact slice path the caller intends. If the reference is ambiguous (
 ### 3. Load context
 
 - Read `CLAUDE.md` at the repo root.
-- Read the slice file in full. Its "What to build", "Files", and "Acceptance criteria" sections are the contract — don't invent scope beyond them.
-- Read every file the "Files" section references and the adjacent code needed to match existing patterns.
+- Read the slice file in full. Its "What to build" and "Acceptance criteria" sections are the contract — don't invent scope beyond them.
+- A slice names behavior, not files (paths go stale, so they're kept out on purpose). Locate the code that behavior lives in yourself, and read the adjacent code needed to match existing patterns.
+- If the repo has a `CONTEXT.md` (or a `CONTEXT-MAP.md` naming per-context ones), use its vocabulary; honor the ADRs in `docs/adr/` covering the area you're touching.
 - If the slice involves a library you're not sure about, look up its docs (e.g. via context7 if available) before guessing.
 
 ### 4. Implement

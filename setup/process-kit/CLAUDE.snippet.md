@@ -9,7 +9,8 @@ scaffolded by `coder/setup/init-target.sh`, make the loop work:
 
 - **`.claude/skills/implement`** — orchestrates a story end-to-end: claims it from
   `kanban-board/02-refined/`, runs `slice-lander` subagents one slice at a time, pushes each
-  landed slice, parks anything needing a human in `kanban-board/04-user-verification/`.
+  landed slice, parks every finished story in `kanban-board/04-user-verification/` for you
+  to verify.
 - **`.claude/agents/slice-lander`** — lands exactly one slice: implements it, runs this repo's
   verification gate, commits, moves the slice file `01-todo/ → 02-in-progress/ → 03-done/`.
 
@@ -21,11 +22,11 @@ The human-driven half of the process runs on your own machine, **not** in the lo
 kit bundles it too so a fresh repo has the whole lifecycle:
 
 - **Fill the queue:** `/add-story` (capture a problem in `01-backlog`), then `/refine` (grill
-  it, slice it via `/to-slices` + `/grill-me`, promote to `02-refined`).
-- **Resume a parked story:** when `/implement` parks a story in `04-user-verification/` for a
-  human to eyeball a UI slice, `/accept-verification <slug>` is the accept path — it deletes
-  the story if nothing remains, or moves it back to `03-in-progress/` so the loop resumes the
-  rest.
+  it via `/grill-with-docs`, slice it via `/to-slices`, promote to `02-refined`).
+- **Close a parked story:** `/implement` parks every story it finishes in
+  `04-user-verification/` and never deletes one. `/accept-verification <slug>` is the accept
+  path — it deletes the story if nothing remains, or moves it back to `03-in-progress/` so the
+  loop resumes the rest (an escalation park).
 
 The loop never invokes any of these — it only runs `/implement`.
 

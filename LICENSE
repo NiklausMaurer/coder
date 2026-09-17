@@ -28,8 +28,10 @@ This project's onboarding kit (setup/process-kit/) bundles two skills derived
 from Matt Pocock's "Skills For Real Engineers" (https://github.com/mattpocock/skills),
 used and redistributed under the MIT License:
 
-  - .claude/skills/grill-me/    — a verbatim copy of upstream skills/productivity/grill-me.
-  - .claude/skills/to-slices/   — adapted from upstream skills/engineering/to-issues
+  - .claude/skills/grill-with-docs/ — adapted from upstream skills/productivity/grilling
+                                  and skills/engineering/domain-modeling (merged into one
+                                  skill, with its CONTEXT.md and ADR formats trimmed).
+  - .claude/skills/to-slices/   — adapted from upstream skills/engineering/to-tickets
                                   (re-pointed to write kanban slice files instead of
                                   publishing issues to a tracker).
 

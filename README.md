@@ -46,21 +46,24 @@ slices** that an agent can land one at a time. Work flows left-to-right through
 the columns, mostly unattended:
 
 ```
-/add-story ─▶ 01-backlog ─/refine─▶ 02-refined ─/implement─▶ 03-in-progress ─▶ done (deleted)
-                                                     │                ▲
-                                         parks blocker│                │ /accept-verification
-                                                     ▼                │
-                                            04-user-verification ──────┘
+/add-story ─▶ 01-backlog ─/refine─▶ 02-refined ─/implement─▶ 03-in-progress
+                                                                  │
+                                                 every story parks │
+                                                                  ▼
+             (deleted) ◀─/accept-verification─  04-user-verification
+                                                                  │
+                                 escalation: back to 03-in-progress┘
 ```
 
 You fill the queue interactively (`/add-story`, then `/refine` — which grills the
-problem and slices it). The loop drains it autonomously: `/implement` claims the
-next refined story and lands its slices via a `slice-lander` subagent, pushing each
-one and **parking** anything that needs a human in `04-user-verification/`, where you
-release it with `/accept-verification`. The loop only ever runs `/implement`; the
-rest is human-driven and runs on your machine.
+problem, settles its vocabulary into `CONTEXT.md`/`docs/adr/`, and slices it). The
+loop drains it autonomously: `/implement` claims the next refined story and lands its
+slices via a `slice-lander` subagent, pushing each one and **parking** the story in
+`04-user-verification/` when it finishes — every story gets one human check, released
+with `/accept-verification`. The loop only ever runs `/implement`; the rest is
+human-driven and runs on your machine.
 
-The full newcomer's guide — stories vs slices, AFK/HITL, every column and skill — is
+The full newcomer's guide — stories vs slices, every column and skill — is
 **[`setup/process-kit/kanban-board/README.md`](setup/process-kit/kanban-board/README.md)**,
 which onboarding installs into each target repo's `kanban-board/`.
 
@@ -414,8 +417,9 @@ without re-architecting how the loop persists them.
 
 MIT — see [`LICENSE`](LICENSE).
 
-The onboarding kit bundles two skills from Matt Pocock's
-[Skills For Real Engineers](https://github.com/mattpocock/skills) (MIT): `grill-me`
-(verbatim) and `to-slices` (adapted from his `to-issues`). Each carries its
-attribution inline and the third-party notice is recorded in `LICENSE`. See
+The onboarding kit bundles two skills adapted from Matt Pocock's
+[Skills For Real Engineers](https://github.com/mattpocock/skills) (MIT):
+`grill-with-docs` (from his `grilling` + `domain-modeling`) and `to-slices` (from his
+`to-tickets`). Each carries its attribution inline and the third-party notice is
+recorded in `LICENSE`. See
 [`setup/README.md`](setup/README.md#credits--licensing) for details.

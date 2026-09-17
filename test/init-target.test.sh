@@ -49,11 +49,18 @@ test_scaffolds_a_fresh_repo() {
     && ok "installs the slice-lander agent" || nope "missing slice-lander agent"
 
   local skill missing_skill=0
-  for skill in add-story refine to-slices grill-me accept-verification; do
+  for skill in add-story refine to-slices grill-with-docs accept-verification; do
     [ -f "$repo/.claude/skills/$skill/SKILL.md" ] || missing_skill=1
   done
-  [ "$missing_skill" -eq 0 ] && ok "installs the human-side skills (add-story/refine/to-slices/grill-me/accept-verification)" \
+  [ "$missing_skill" -eq 0 ] && ok "installs the human-side skills (add-story/refine/to-slices/grill-with-docs/accept-verification)" \
     || nope "missing one of the human-side skills"
+
+  # A skill is a directory: reference files a SKILL.md links to must travel with
+  # it, or the scaffolded skill points at files the target repo doesn't have.
+  [ -f "$repo/.claude/skills/grill-with-docs/CONTEXT-FORMAT.md" ] \
+    && [ -f "$repo/.claude/skills/grill-with-docs/ADR-FORMAT.md" ] \
+    && ok "installs a skill's sibling reference files, not just its SKILL.md" \
+    || nope "grill-with-docs reference files did not travel with the skill"
 
   local col missing=0
   for col in 01-backlog 02-refined 03-in-progress 04-user-verification; do

@@ -31,7 +31,8 @@ history, because:
 ```
 process-kit/
   .claude/skills/implement/SKILL.md    # process-generic, copied ~verbatim
-  .claude/skills/{add-story,refine,to-slices,grill-me}/SKILL.md  # queue-filling pipeline
+  .claude/skills/{add-story,refine,to-slices}/SKILL.md  # queue-filling pipeline
+  .claude/skills/grill-with-docs/      # the refine interview (+ CONTEXT/ADR formats)
   .claude/skills/accept-verification/SKILL.md  # human-side resume of a parked story
   .claude/agents/slice-lander.md       # template; repo-specific blanks marked coder:autofill
   .claude/coder-plugins                # which Claude plugins the loop installs (all-commented template)
@@ -42,7 +43,7 @@ process-kit/
 ```
 
 New to the process? **[`process-kit/kanban-board/README.md`](process-kit/kanban-board/README.md)**
-is the full newcomer's guide — stories, slices, AFK/HITL, the columns, and which skill
+is the full newcomer's guide — stories, slices, the columns, and which skill
 moves work where. It's scaffolded into every onboarded repo so its users have it too.
 
 Two tiers of skill:
@@ -52,9 +53,10 @@ Two tiers of skill:
   carries `<!-- coder:autofill <key> -->` blocks for the parts that differ per repo —
   **architecture** invariants, the **verify** command gate, and the **commit-convention**
   (message style + trailer).
-- **Human-driven lifecycle** — `add-story` → `refine` (which orchestrates `to-slices`
-  + `grill-me`) fills the queue; `accept-verification` is the accept path for a story
-  `/implement` parked in `04-user-verification/` for a UI check. This half runs on your
+- **Human-driven lifecycle** — `add-story` → `refine` (which orchestrates
+  `grill-with-docs` + `to-slices`) fills the queue; `accept-verification` is the accept
+  path for a story `/implement` parked in `04-user-verification/`, and the only thing
+  that deletes a finished story. This half runs on your
   machine, never in the loop's container. Bundled so a fresh repo has the whole process,
   not just the loop's half. `refine` and `accept-verification` carry a **commit-convention**
   autofill block.
@@ -147,8 +149,10 @@ Two skills in `process-kit/` come from Matt Pocock's
 [Skills For Real Engineers](https://github.com/mattpocock/skills) (MIT-licensed),
 re-used here under MIT:
 
-- **`grill-me`** — a verbatim copy of upstream `skills/productivity/grill-me`.
-- **`to-slices`** — adapted from upstream `skills/engineering/to-issues`, re-pointed to
+- **`grill-with-docs`** — adapted from upstream `skills/productivity/grilling` and
+  `skills/engineering/domain-modeling`, merged into one skill so the refine interview
+  also settles the repo's `CONTEXT.md` glossary and ADRs.
+- **`to-slices`** — adapted from upstream `skills/engineering/to-tickets`, re-pointed to
   write kanban slice files instead of publishing issues to a tracker.
 
 Each derived file carries this attribution inline (so it travels into every repo it's

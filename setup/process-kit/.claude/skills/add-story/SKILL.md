@@ -5,79 +5,54 @@ description: Create a new story in the kanban-board backlog — kanban-board/01-
 
 # Add Story
 
-Create a new backlog story under `kanban-board/01-backlog/NN-<slug>/`. A backlog story is just a problem statement — slices are added later by `/refine`.
-
-## What gets created
-
-```
-kanban-board/01-backlog/NN-<slug>/
-└── problem.md
-```
-
-No slice subdirs (`01-todo`, etc.) — `/refine` creates those when the story is refined.
+Create a backlog story at `kanban-board/01-backlog/NN-<slug>/problem.md`. A backlog story
+is only a problem statement — `/refine` adds the slices and the `01-todo/` subdir later.
 
 ## Process
 
 ### 1. Resolve the slug
 
-The slug must be **kebab-case** (lowercase `a-z`, digits `0-9`, and dashes `-` only — no spaces, no uppercase). Examples: `db-schema-migrations`, `payment-retry-flow`.
+The slug is **kebab-case**: `^[a-z0-9]+(-[a-z0-9]+)*$`, e.g. `payment-retry-flow`.
 
-- If the user passed a slug as an argument, validate it. Reject anything that doesn't match `^[a-z0-9]+(-[a-z0-9]+)*$` and ask them to fix it.
-- If they passed a free-text title (e.g. "DB schema migrations"), do NOT silently slugify it. Show them the kebab-case form you'd use and confirm before proceeding.
-- If no slug was provided at all, ask for one.
+- Slug passed as an argument → validate it; reject anything that doesn't match and ask.
+- Free-text title passed (e.g. "DB schema migrations") → show the kebab-case form you'd
+  use and confirm before proceeding. Never silently slugify.
+- Nothing passed → ask.
 
 ### 2. Resolve the problem statement
 
-The problem statement goes verbatim into `problem.md`. It's usually 1–3 sentences explaining _why_ the story exists — the user-facing problem or motivation, not the implementation.
-
-- If the user passed a problem description, use it as-is.
-- If not, ask for it. Don't invent one.
+Usually 1–3 sentences on _why_ the story exists — the user-facing problem, not the
+implementation. Use what the user passed verbatim; if they passed none, ask. Don't invent
+one.
 
 ### 3. Check preconditions
 
-Before creating anything:
+- `kanban-board/01-backlog/` must exist. If not, stop — the project may not use this
+  convention.
+- No story with this slug may exist in **any** column: check `kanban-board/*/NN-<slug>/`,
+  matching on the `-<slug>` suffix since the `NN-` prefix varies. If one exists, stop and
+  surface its path rather than creating a duplicate.
 
-- The repo must contain `kanban-board/01-backlog/` (the backlog column). If missing, stop and tell the user — the project may not use this convention.
-- No story with this slug may already exist in **any** column. Check `kanban-board/*/NN-<slug>/` (the `NN-` prefix varies, so match on the `-<slug>` suffix). If one exists, stop and surface the existing path rather than creating a duplicate.
+### 4. Create and commit
 
-### 4. Resolve the prefix
+Assign the next backlog `NN-` prefix by appending (highest existing in
+`kanban-board/01-backlog/*/` plus one, zero-padded, or `01` if empty; gaps are fine, never
+renumber), then write `problem.md` with the statement as the entire file body — no
+frontmatter, no headings.
 
-Story folders are ordered within their column by a two-digit `NN-` prefix (priority order — lowest is next). Assign the backlog prefix by **appending**: take the highest existing `NN-` among `kanban-board/01-backlog/*/` and add one, zero-padded to two digits. If the backlog is empty, start at `01`.
-
-Gaps are fine — never renumber existing folders to close them.
-
-### 5. Create the scaffold
-
-```sh
-mkdir -p kanban-board/01-backlog/NN-<slug>
-```
-
-Then write `problem.md` with the problem statement as the entire file body (no frontmatter, no headings — match the existing convention).
-
-### 6. Commit the story
-
-Always commit the new story before reporting — one commit per `/add-story` invocation.
-
-Commit **only** the new `problem.md`, using a path-limited commit so unrelated staged or in-flight changes are never swept in:
+Commit **path-limited**, so unrelated staged or in-flight changes are never swept in (the
+loop's uncommitted slice work may be sitting in the tree):
 
 ```sh
 git add kanban-board/01-backlog/NN-<slug>/problem.md
 git commit kanban-board/01-backlog/NN-<slug>/problem.md -m "Adds <slug> backlog story"
 ```
 
-Commit directly to the working branch per this repo's convention (the loop model is commit-per-change on the branch, not feature branches). Do not push.
+One commit per invocation, directly on the working branch per this repo's convention (the
+loop model is commit-per-change on the branch, not feature branches). Push it if the loop
+is running against this repo — its per-iteration `git reset --hard` destroys unpushed
+commits.
 
-### 7. Report
+### 5. Report
 
-Tell the user the path that was created and the next step: `/refine <slug>` to grill the problem and break it into slices.
-
-## Example
-
-User: `/add-story payment-retry-flow Failed Stripe charges currently surface as a generic 500. We need a retry path so transient failures don't lose the order.`
-
-Result (assuming the backlog already holds `01-...` and `02-...`):
-
-```
-kanban-board/01-backlog/03-payment-retry-flow/
-└── problem.md          # the two-sentence description verbatim
-```
+The path created, and the next step: `/refine <slug>` to grill the problem and slice it.
