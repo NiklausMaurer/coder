@@ -28,7 +28,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI (installed as root into /usr/local, runnable by any user).
-RUN npm install -g @anthropic-ai/claude-code
+# The version is a build arg so an upgrade is explicit and busts the layer cache —
+# an unpinned `npm install` layer would otherwise stay cached on the old CLI:
+#   docker build --build-arg CLAUDE_CODE_VERSION=$(npm view @anthropic-ai/claude-code version) -t coder .
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Non-root user (see header). --create-home gives a writable HOME for git config,
 # Claude's ~/.claude config/cache dir, and the per-user Nix profile.
@@ -52,7 +56,11 @@ RUN mkdir -p /data/checkout /data/state && chown -R coder:coder /data
 COPY bin/ /app/bin/
 RUN chmod +x /app/bin/*.sh
 
+# ANTHROPIC_MODEL pins the model every `claude -p` run uses, rather than
+# inheriting whatever the account's default happens to be. It is an image default,
+# not a loop concern: a target overrides it from its .env.
 ENV HOME=/home/coder \
+    ANTHROPIC_MODEL=claude-opus-5-5 \
     CHECKOUT_DIR=/data/checkout \
     STATE_FILE=/data/state/retry-counts \
     PATH=/home/coder/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

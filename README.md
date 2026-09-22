@@ -180,6 +180,7 @@ non-zero (124), so callers (and the loop) see it as a failed attempt.
 | `PLUGIN_MANIFEST`| no       | `.claude/coder-plugins`| where the target declares its Claude plugins (within the checkout) |
 | `PLUGIN_SYNC_MARKER`| no    | `$HOME/.coder/plugin-sync`| fingerprint of the last-installed manifest, to skip re-syncing |
 | `NIX_BIN`        | no       | `nix`                  | Nix binary used to enter a target's `flake.nix` dev shell |
+| `ANTHROPIC_MODEL`| no       | `claude-opus-5-5` (image) | model for every `claude -p` run; set in the image, override per target |
 
 ### Run
 
