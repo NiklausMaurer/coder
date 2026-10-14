@@ -52,4 +52,13 @@ git config --global user.email "${GIT_USER_EMAIL:-coder@autonomous-loop}"
 # so a host bind-mount can't trip git's dubious-ownership guard.
 git config --global --add safe.directory '*'
 
+# When /implement's push is rejected because the remote moved, Claude reaches
+# for `git pull`, whose default is a merge commit. Make every pull rebase the
+# local, still-unpushed slice commits onto the remote instead, keeping the
+# target's history linear. This only replays commits that were never pushed, so
+# it doesn't break the "never rewrite pushed history" invariant. autoStash
+# covers a pull that runs with stray edits still in the tree.
+git config --global pull.rebase true
+git config --global rebase.autoStash true
+
 exec "$SCRIPT_DIR/loop.sh" "$@"
