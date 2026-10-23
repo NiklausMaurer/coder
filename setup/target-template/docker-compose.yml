@@ -39,6 +39,14 @@ services:
       # package manager, system deps) is built/downloaded once, not on every
       # container recreate. Seeded from the image's base Nix store on first use.
       - nix:/nix
+    # Keep /tmp in RAM. The container's root filesystem is overlayfs, where
+    # fsync is slow, and test tooling that keeps scratch storage in os.tmpdir()
+    # stalls on it: kitchen's API suite (workerd D1/Durable Object storage) ran
+    # 39-119 s with timeouts here against a steady 25 s on a tmpfs /tmp.
+    # Docker mounts tmpfs noexec by default; `exec` keeps tools that unpack
+    # and run a binary from /tmp working.
+    tmpfs:
+      - /tmp:size=4g,exec,mode=1777
 
 # Per-target, not shared across targets. A shared Nix store would dedupe the
 # closures, but it makes one store the single piece of mutable state behind every
